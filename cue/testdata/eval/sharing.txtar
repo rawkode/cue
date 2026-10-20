@@ -225,17 +225,17 @@ issue3903: noshare: {
 }
 -- out/evalalpha/stats --
 Leaks:  7
-Freed:  229
-Reused: 205
+Freed:  225
+Reused: 201
 Allocs: 31
 Retain: 0
 
-Unifications: 224
-Conjuncts:    413
+Unifications: 220
+Conjuncts:    393
 Disjuncts:    6
 Notifications: 1
 
-NumCloseIDs: 105
+NumCloseIDs: 95
 -- diff/-out/evalalpha/stats<==>+out/eval/stats --
 diff old new
 --- old
@@ -255,17 +255,17 @@ diff old new
 -
 -NumCloseIDs: 7
 +Leaks:  7
-+Freed:  229
-+Reused: 205
++Freed:  225
++Reused: 201
 +Allocs: 31
 +Retain: 0
 +
-+Unifications: 224
-+Conjuncts:    413
++Unifications: 220
++Conjuncts:    393
 +Disjuncts:    6
 +Notifications: 1
 +
-+NumCloseIDs: 105
++NumCloseIDs: 95
 -- out/eval/stats --
 Leaks:  6
 Freed:  272
@@ -420,12 +420,7 @@ Result:
       }
       let config#1 = ~(issue3641.full.#Config)
       out: (#struct){
-        sch: (#struct){
-          cfg: (#struct){
-            ctx: (#struct){
-            }
-          }
-        }
+        sch: ~(issue3641.full.#Config)
       }
     }
   }
@@ -448,11 +443,7 @@ Result:
           0: (string){ "a" }
         }
       }
-      out: (#struct){
-        list: (#list){
-          0: (string){ "a" }
-        }
-      }
+      out: ~(issue3546.reduced.val)
     }
   }
   issue3062: (struct){
@@ -889,7 +880,7 @@ diff old new
        }
        #Config: (#struct){
          cfg: (#struct){
-@@ -173,12 +135,7 @@
+@@ -173,19 +135,9 @@
            }
          }
        }
@@ -899,11 +890,33 @@ diff old new
 -          }
 -        }
 -      }
+-      out: (#struct){
+-        sch: (#struct){
+-          cfg: (#struct){
+-            ctx: (#struct){
+-            }
+-          }
+-        }
 +      let config#1 = ~(issue3641.full.#Config)
-       out: (#struct){
-         sch: (#struct){
-           cfg: (#struct){
-@@ -247,9 +204,7 @@
++      out: (#struct){
++        sch: ~(issue3641.full.#Config)
+       }
+     }
+   }
+@@ -208,11 +160,7 @@
+           0: (string){ "a" }
+         }
+       }
+-      out: (#struct){
+-        list: (#list){
+-          0: (string){ "a" }
+-        }
+-      }
++      out: ~(issue3546.reduced.val)
+     }
+   }
+   issue3062: (struct){
+@@ -247,9 +195,7 @@
    }
    debug: (struct){
      sharingOn: (struct){
@@ -914,7 +927,7 @@ diff old new
        b: (struct){
          c: (int){ 1 }
        }
-@@ -293,14 +248,12 @@
+@@ -293,14 +239,12 @@
            name: (string){ "foo" }
          }, (null){ null }) }
        let _inputList#2 = (#list){
@@ -935,7 +948,7 @@ diff old new
        }
        _template: (struct){
          input: (struct){
-@@ -324,14 +277,14 @@
+@@ -324,14 +268,14 @@
            name: (string){ "foo" }
          }, (null){ null }) }
        let _inputList#3 = (#list){
@@ -958,7 +971,7 @@ diff old new
        }
        _template: (struct){
          input: (struct){
-@@ -345,9 +298,13 @@
+@@ -345,9 +289,13 @@
        }
        foo: (struct){
          input: (struct){
@@ -975,7 +988,7 @@ diff old new
        }
      }
    }
-@@ -356,17 +313,13 @@
+@@ -356,17 +304,13 @@
        a: (struct){
          b: (struct){
            c: (struct){
@@ -999,7 +1012,7 @@ diff old new
        }
        Y: (struct){
          c: (struct){
-@@ -384,10 +337,7 @@
+@@ -384,10 +328,7 @@
        }
      }
      #Deployment: (#struct){
@@ -1011,7 +1024,7 @@ diff old new
      }
      #ObjectMeta: (#struct){
        name?: (#struct){
-@@ -419,9 +369,9 @@
+@@ -419,9 +360,9 @@
            // [eval] shareCycle.t2.Y.x: conflicting values int and {x:(#X & Y)} (mismatched types int and struct):
            //     ./sharecycle.cue:8:6
            //     ./sharecycle.cue:9:5

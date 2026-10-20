@@ -40,17 +40,17 @@ p2: {
 }
 
 -- out/evalalpha/stats --
-Leaks:  46
-Freed:  93
-Reused: 76
-Allocs: 63
+Leaks:  23
+Freed:  70
+Reused: 53
+Allocs: 40
 Retain: 0
 
-Unifications: 79
-Conjuncts:    157
-Disjuncts:    12
+Unifications: 53
+Conjuncts:    100
+Disjuncts:    8
 
-NumCloseIDs: 38
+NumCloseIDs: 22
 -- diff/-out/evalalpha/stats<==>+out/eval/stats --
 diff old new
 --- old
@@ -65,17 +65,17 @@ diff old new
 -Unifications: 173
 -Conjuncts:    557
 -Disjuncts:    189
-+Leaks:  46
-+Freed:  93
-+Reused: 76
-+Allocs: 63
++Leaks:  23
++Freed:  70
++Reused: 53
++Allocs: 40
 +Retain: 0
 +
-+Unifications: 79
-+Conjuncts:    157
-+Disjuncts:    12
++Unifications: 53
++Conjuncts:    100
++Disjuncts:    8
 +
-+NumCloseIDs: 38
++NumCloseIDs: 22
 -- out/eval/stats --
 Leaks:  18
 Freed:  171
@@ -135,20 +135,7 @@ Disjuncts:    189
         0: (int){ 3 }
       }
     }
-    b: (#struct){
-      x: (int){ 3 }
-      y?: (int){ int }
-      let list#1 = (#list){
-        0: (int){ 3 }
-        1: (_|_){
-          // [incomplete] p1.b.list.1: cannot reference optional field: y:
-          //     ./in.cue:6:18
-        }
-      }
-      all: (#list){
-        0: (int){ 3 }
-      }
-    }
+    b: ~(p1.a)
   }
   p2: (struct){
     #A: (#struct){ |(*(#struct){
@@ -195,57 +182,51 @@ Disjuncts:    189
         1: (int){ 2 }
       }
     }
-    b: (#struct){
-      x: (int){ 3 }
-      y: (int){ 2 }
-      let list#2 = (#list){
-        0: (int){ 3 }
-        1: (int){ 2 }
-      }
-      all: (#list){
-        0: (int){ 3 }
-        1: (int){ 2 }
-      }
-    }
+    b: ~(p2.a)
   }
 }
 -- diff/-out/evalalpha<==>+out/eval --
 diff old new
 --- old
 +++ new
-@@ -49,10 +49,13 @@
-     b: (#struct){
-       x: (int){ 3 }
-       y?: (int){ int }
+@@ -46,17 +46,7 @@
+         0: (int){ 3 }
+       }
+     }
+-    b: (#struct){
+-      x: (int){ 3 }
+-      y?: (int){ int }
 -      let list#1multi = [
 -        〈1;x〉,
 -        〈1;y〉,
 -      ]
-+      let list#1 = (#list){
-+        0: (int){ 3 }
-+        1: (_|_){
-+          // [incomplete] p1.b.list.1: cannot reference optional field: y:
-+          //     ./in.cue:6:18
-+        }
-+      }
-       all: (#list){
-         0: (int){ 3 }
+-      all: (#list){
+-        0: (int){ 3 }
+-      }
+-    }
++    b: ~(p1.a)
+   }
+   p2: (struct){
+     #A: (#struct){ |(*(#struct){
+@@ -103,17 +93,6 @@
+         1: (int){ 2 }
        }
-@@ -106,10 +109,10 @@
-     b: (#struct){
-       x: (int){ 3 }
-       y: (int){ 2 }
+     }
+-    b: (#struct){
+-      x: (int){ 3 }
+-      y: (int){ 2 }
 -      let list#2multi = [
 -        〈1;x〉,
 -        〈1;y〉,
 -      ]
-+      let list#2 = (#list){
-+        0: (int){ 3 }
-+        1: (int){ 2 }
-+      }
-       all: (#list){
-         0: (int){ 3 }
-         1: (int){ 2 }
+-      all: (#list){
+-        0: (int){ 3 }
+-        1: (int){ 2 }
+-      }
+-    }
++    b: ~(p2.a)
+   }
+ }
 -- out/eval --
 (struct){
   p1: (struct){

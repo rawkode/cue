@@ -80,20 +80,20 @@ out: #sub & {#p: _test.s1}
 -- diff/todo/p3 --
 Reordering
 -- out/evalalpha/stats --
-Leaks:  192
-Freed:  678
-Reused: 646
-Allocs: 224
+Leaks:  91
+Freed:  371
+Reused: 342
+Allocs: 120
 Retain: 0
 
-Unifications: 338
-Conjuncts:    1388
-Disjuncts:    106
+Unifications: 208
+Conjuncts:    759
+Disjuncts:    52
 
-NumCloseIDs: 434
+NumCloseIDs: 213
 
-ConjunctInfos:       1007
-MaxConjunctInfos:    5
+ConjunctInfos:       550
+MaxConjunctInfos:    4
 MaxReqSets:          19
 MaxRedirect:         4
 -- out/evalalpha --
@@ -296,22 +296,8 @@ MaxRedirect:         4
     }
     dict: (#struct){
       r1: ~(out.#p.d.r.r1)
-      r2_r1: (#struct){
-        a: (#struct){
-          d: (#struct){
-            n: (string){ "c1" }
-          }
-          k: (string){ "simple" }
-        }
-      }
-      r2_r2_r1: (#struct){
-        a: (#struct){
-          d: (#struct){
-            n: (string){ "c1" }
-          }
-          k: (string){ "simple" }
-        }
-      }
+      r2_r1: ~(out.#p.d.r.r2.a.d.r.r1)
+      r2_r2_r1: ~(out.#p.d.r.r2.a.d.r.r2.a.d.r.r1)
     }
     let subs#1multi = (〈3;#sub〉 & {
       #p: 〈2;rd〉.a
@@ -336,20 +322,20 @@ diff old new
 -MisalignedConjunct: 4502
 -
 -NumCloseIDs: 4
-+Leaks:  192
-+Freed:  678
-+Reused: 646
-+Allocs: 224
++Leaks:  91
++Freed:  371
++Reused: 342
++Allocs: 120
 +Retain: 0
 +
-+Unifications: 338
-+Conjuncts:    1388
-+Disjuncts:    106
++Unifications: 208
++Conjuncts:    759
++Disjuncts:    52
 +
-+NumCloseIDs: 434
++NumCloseIDs: 213
 +
-+ConjunctInfos:       1007
-+MaxConjunctInfos:    5
++ConjunctInfos:       550
++MaxConjunctInfos:    4
 +MaxReqSets:          19
 +MaxRedirect:         4
 -- diff/-out/evalalpha<==>+out/eval --
@@ -408,7 +394,7 @@ diff old new
      dict: (#struct){
      }
      let subs#1multi = (〈3;#sub〉 & {
-@@ -53,190 +34,183 @@
+@@ -53,192 +34,171 @@
    }
    _test: (struct){
      c1: (#struct){
@@ -664,6 +650,22 @@ diff old new
 -          }
 -        }
 -      }
+-      r2_r1: (#struct){
+-        a: (#struct){
+-          k: (string){ "simple" }
+-          d: (#struct){
+-            n: (string){ "c1" }
+-          }
+-        }
+-      }
+-      r2_r2_r1: (#struct){
+-        a: (#struct){
+-          k: (string){ "simple" }
+-          d: (#struct){
+-            n: (string){ "c1" }
+-          }
+-        }
+-      }
 +      d: (#struct){
 +        n: (string){ "s1" }
 +        r: (#struct){
@@ -717,31 +719,11 @@ diff old new
 +    }
 +    dict: (#struct){
 +      r1: ~(out.#p.d.r.r1)
-       r2_r1: (#struct){
-         a: (#struct){
--          k: (string){ "simple" }
--          d: (#struct){
--            n: (string){ "c1" }
--          }
-+          d: (#struct){
-+            n: (string){ "c1" }
-+          }
-+          k: (string){ "simple" }
-         }
-       }
-       r2_r2_r1: (#struct){
-         a: (#struct){
--          k: (string){ "simple" }
--          d: (#struct){
--            n: (string){ "c1" }
--          }
-+          d: (#struct){
-+            n: (string){ "c1" }
-+          }
-+          k: (string){ "simple" }
-         }
-       }
++      r2_r1: ~(out.#p.d.r.r2.a.d.r.r1)
++      r2_r2_r1: ~(out.#p.d.r.r2.a.d.r.r2.a.d.r.r1)
      }
+     let subs#1multi = (〈3;#sub〉 & {
+       #p: 〈2;rd〉.a
 -- out/eval/stats --
 Leaks:  6
 Freed:  3232

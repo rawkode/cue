@@ -351,7 +351,7 @@ func (n *nodeContext) scheduleVertexConjuncts(c Conjunct, arc *Vertex, closeInfo
 	// disjunctions, we need to dereference he underlying node.
 	if deref(n.node) == deref(arc) {
 		if n.isShared {
-			n.addShared(closeInfo)
+			n.addShared(n.shared, n.node.BaseValue.(*Vertex), closeInfo)
 		}
 		return
 	}

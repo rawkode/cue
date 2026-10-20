@@ -110,15 +110,7 @@ Disjuncts:    47
       bar: (#struct){
         i: (string){ "hello bar" }
         depends_on: (#list){
-          0: (#struct){
-            x: (int){ 10 }
-            y: (#struct){
-              z: (string){ "z" }
-            }
-            n: (string){ "foo" }
-            depends_on: (list){
-            }
-          }
+          0: ~(a.s.foo)
         }
         n: (string){ "bar" }
       }
@@ -152,7 +144,7 @@ Disjuncts:    47
 diff old new
 --- old
 +++ new
-@@ -11,44 +11,44 @@
+@@ -11,44 +11,36 @@
        }
      }
      #A1: (#struct){
@@ -194,23 +186,20 @@ diff old new
        }
        bar: (#struct){
 -        n: (string){ "bar" }
-+        i: (string){ "hello bar" }
-         depends_on: (#list){
-           0: (#struct){
+-        depends_on: (#list){
+-          0: (#struct){
 -            n: (string){ "foo" }
 -            depends_on: (list){
 -            }
-             x: (int){ 10 }
-             y: (#struct){
-               z: (string){ "z" }
-             }
+-            x: (int){ 10 }
+-            y: (#struct){
+-              z: (string){ "z" }
+-            }
 -          }
 -        }
--        i: (string){ "hello bar" }
-+            n: (string){ "foo" }
-+            depends_on: (list){
-+            }
-+          }
+         i: (string){ "hello bar" }
++        depends_on: (#list){
++          0: ~(a.s.foo)
 +        }
 +        n: (string){ "bar" }
        }

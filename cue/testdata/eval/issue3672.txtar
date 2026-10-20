@@ -301,20 +301,20 @@ value0: Only: [{UseSectionName: true}]
 }
 -- out/evalalpha/stats --
 Leaks:  345
-Freed:  1760
+Freed:  1758
 Reused: 1702
-Allocs: 403
+Allocs: 401
 Retain: 0
 
 Unifications: 386
-Conjuncts:    2354
+Conjuncts:    2169
 Disjuncts:    576
 
-NumCloseIDs: 821
+NumCloseIDs: 759
 
-ConjunctInfos:       886
+ConjunctInfos:       823
 MaxConjunctInfos:    7
-MaxReqSets:          15
+MaxReqSets:          16
 MaxRedirect:         6
 -- diff/-out/evalalpha/stats<==>+out/eval/stats --
 diff old new
@@ -331,20 +331,20 @@ diff old new
 -Conjuncts:    468967
 -Disjuncts:    330375
 +Leaks:  345
-+Freed:  1760
++Freed:  1758
 +Reused: 1702
-+Allocs: 403
++Allocs: 401
 +Retain: 0
 +
 +Unifications: 386
-+Conjuncts:    2354
++Conjuncts:    2169
 +Disjuncts:    576
 +
-+NumCloseIDs: 821
++NumCloseIDs: 759
 +
-+ConjunctInfos:       886
++ConjunctInfos:       823
 +MaxConjunctInfos:    7
-+MaxReqSets:          15
++MaxReqSets:          16
 +MaxRedirect:         6
 -- out/eval/stats --
 Leaks:  237

@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"fmt"
 	"math/big"
+	"sync/atomic"
 
 	"github.com/cockroachdb/apd/v3"
 
@@ -48,7 +49,7 @@ type StructLit struct {
 	IsOpen bool // has a ...
 
 	// initialized is kept as it's used in the Init method and unify.go
-	initialized bool
+	initialized atomic.Bool
 
 	// isComprehension is kept as it's used in comprehension.go and conjunct.go
 	isComprehension bool
@@ -95,10 +96,10 @@ func (x *StructLit) evaluate(c *OpContext, state Flags) Value {
 }
 
 func (o *StructLit) Init(ctx *OpContext) {
-	if o.initialized {
+	if o.initialized.Load() {
 		return
 	}
-	o.initialized = true
+	o.initialized.Store(true)
 }
 
 // FIELDS

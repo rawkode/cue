@@ -175,6 +175,14 @@ func (v *Vertex) unify(c *OpContext, flags Flags) bool {
 		return true // already completed
 	}
 
+	// A shared target or selected disjunct can record cycle evidence under
+	// different ancestry. Preserve that evidence on the referring value too.
+	defer func() {
+		if v.cycleSensitive || v.DerefValue().cycleSensitive {
+			v.markCycleSensitive()
+		}
+	}()
+
 	n.retainProcess()
 	defer func() {
 		n.releaseProcess()
@@ -709,7 +717,7 @@ func (n *nodeContext) completeAllArcs(needs condition, mode runMode, checkTypos 
 	// TODO(perf): we could keep track if any such structs exist and only
 	// do this removal if there is a change of shrinking the list.
 	n.node.Structs = slices.DeleteFunc(n.node.Structs, func(s StructInfo) bool {
-		return !s.initialized
+		return !s.initialized.Load()
 	})
 
 	// TODO: This seems to be necessary, but enables structural cycles.

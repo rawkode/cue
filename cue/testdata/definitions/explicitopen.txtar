@@ -390,9 +390,7 @@ Result:
   combinenew: (_|_){
     // [eval]
     a0: (struct){
-      ok: (#struct){
-        a: (int){ 1 }
-      }
+      ok: ~(NewClosed1)
     }
     a1: (struct){
       ok: (#struct){
@@ -910,9 +908,7 @@ Result:
   combineold: (_|_){
     // [eval]
     a0: (struct){
-      ok: (#struct){
-        a: (int){ 1 }
-      }
+      ok: ~(NewClosed1)
     }
     a1: (struct){
       ok: (#struct){

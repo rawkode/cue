@@ -676,18 +676,18 @@ issue2685: {
 	}
 }
 -- out/evalalpha/stats --
-Leaks:  218
-Freed:  2563
-Reused: 2524
-Allocs: 257
+Leaks:  216
+Freed:  2559
+Reused: 2520
+Allocs: 255
 Retain: 0
 
-Unifications: 667
-Conjuncts:    2771
-Disjuncts:    1302
+Unifications: 665
+Conjuncts:    2759
+Disjuncts:    1300
 Notifications: 4
 
-NumCloseIDs: 323
+NumCloseIDs: 316
 -- diff/-out/evalalpha/stats<==>+out/eval/stats --
 diff old new
 --- old
@@ -706,18 +706,18 @@ diff old new
 -MisalignedConjunct: 44
 -
 -NumCloseIDs: 10
-+Leaks:  218
-+Freed:  2563
-+Reused: 2524
-+Allocs: 257
++Leaks:  216
++Freed:  2559
++Reused: 2520
++Allocs: 255
 +Retain: 0
 +
-+Unifications: 667
-+Conjuncts:    2771
-+Disjuncts:    1302
++Unifications: 665
++Conjuncts:    2759
++Disjuncts:    1300
 +Notifications: 4
 +
-+NumCloseIDs: 323
++NumCloseIDs: 316
 -- out/eval/stats --
 Leaks:  9
 Freed:  2856
@@ -1531,9 +1531,7 @@ issue770: new evaluator fixes a bug in "c" and "coo" where defaults did not appl
       out1: (#struct){
         fooID: (string){ "123" }
       }
-      out2: (#struct){
-        fooID: (string){ "123" }
-      }
+      out2: ~(issue2246.simplified.out1)
     }
     full: (struct){
       data: (struct){
@@ -1875,7 +1873,18 @@ issue770: new evaluator fixes a bug in "c" and "coo" where defaults did not appl
 diff old new
 --- old
 +++ new
-@@ -917,6 +917,18 @@
+@@ -788,9 +788,7 @@
+       out1: (#struct){
+         fooID: (string){ "123" }
+       }
+-      out2: (#struct){
+-        fooID: (string){ "123" }
+-      }
++      out2: ~(issue2246.simplified.out1)
+     }
+     full: (struct){
+       data: (struct){
+@@ -917,6 +915,18 @@
        }
      }
    }

@@ -169,27 +169,22 @@ tabcatsExample: {
   }
 }
 -- out/evalalpha/stats --
-Leaks:  77
-Freed:  162
-Reused: 129
-Allocs: 110
+Leaks:  23
+Freed:  88
+Reused: 64
+Allocs: 47
 Retain: 0
 
-Unifications: 171
-Conjuncts:    284
-Disjuncts:    16
+Unifications: 89
+Conjuncts:    131
+Disjuncts:    6
 
-NumCloseIDs: 57
-
-ConjunctInfos:       243
-MaxConjunctInfos:    5
-MaxReqSets:          14
-MaxRedirect:         3
+NumCloseIDs: 21
 -- diff/-out/evalalpha/stats<==>+out/eval/stats --
 diff old new
 --- old
 +++ new
-@@ -1,9 +1,16 @@
+@@ -1,9 +1,11 @@
 -Leaks:  9
 -Freed:  1508
 -Reused: 1482
@@ -199,22 +194,17 @@ diff old new
 -Unifications: 1373
 -Conjuncts:    3626
 -Disjuncts:    1548
-+Leaks:  77
-+Freed:  162
-+Reused: 129
-+Allocs: 110
++Leaks:  23
++Freed:  88
++Reused: 64
++Allocs: 47
 +Retain: 0
 +
-+Unifications: 171
-+Conjuncts:    284
-+Disjuncts:    16
++Unifications: 89
++Conjuncts:    131
++Disjuncts:    6
 +
-+NumCloseIDs: 57
-+
-+ConjunctInfos:       243
-+MaxConjunctInfos:    5
-+MaxReqSets:          14
-+MaxRedirect:         3
++NumCloseIDs: 21
 -- out/eval/stats --
 Leaks:  9
 Freed:  1508
@@ -299,24 +289,13 @@ Disjuncts:    1548
           Formulare: (#struct){
             Section: (#struct){
               entries: (#struct){
-                Fotodokumentation: (#struct){
-                  SingleForm: (#struct){
-                    formId: (string){ "fotodokumentation" }
-                    showNumberOfInstances?: (bool){ bool }
-                  }
-                  _json: (#list){
-                    0: (#struct){
-                      iDoc: (string){ "singleFormIDoc" }
-                      "X-FormId": (string){ "fotodokumentation" }
-                    }
-                  }
-                }
+                Fotodokumentation: ~(tabcatsExample._e2)
               }
               display?: (string){ string }
             }
             _json: (#list){
               0: (#struct){
-                Fotodokumentation: ~(tabcatsExample._e1.Link.sections.Formulare.Section.entries.Fotodokumentation._json)
+                Fotodokumentation: ~(tabcatsExample._e2._json)
               }
             }
           }
@@ -344,107 +323,25 @@ Disjuncts:    1548
     _s: (#struct){
       Section: (#struct){
         entries: (#struct){
-          Dokumentation: (#struct){
-            Link: (#struct){
-              sections: (#struct){
-                Formulare: (#struct){
-                  Section: (#struct){
-                    entries: (#struct){
-                      Fotodokumentation: (#struct){
-                        SingleForm: (#struct){
-                          formId: (string){ "fotodokumentation" }
-                          showNumberOfInstances?: (bool){ bool }
-                        }
-                        _json: (#list){
-                          0: (#struct){
-                            iDoc: (string){ "singleFormIDoc" }
-                            "X-FormId": (string){ "fotodokumentation" }
-                          }
-                        }
-                      }
-                    }
-                    display?: (string){ string }
-                  }
-                  _json: (#list){
-                    0: (#struct){
-                      Fotodokumentation: ~(tabcatsExample._s.Section.entries.Dokumentation.Link.sections.Formulare.Section.entries.Fotodokumentation._json)
-                    }
-                  }
-                }
-              }
-              icon?: (string){ string }
-            }
-            _json: (#list){
-              0: (#struct){
-                Formulare: ~(tabcatsExample._s.Section.entries.Dokumentation.Link.sections.Formulare._json)
-              }
-            }
-          }
+          Dokumentation: ~(tabcatsExample._e1)
         }
         display?: (string){ string }
       }
       _json: (#list){
         0: (#struct){
-          Dokumentation: ~(tabcatsExample._s.Section.entries.Dokumentation._json)
+          Dokumentation: ~(tabcatsExample._e1._json)
         }
       }
     }
     config: (#struct){
       tabcats: (#struct){
-        "02": (#struct){
-          Section: (#struct){
-            entries: (#struct){
-              Dokumentation: (#struct){
-                Link: (#struct){
-                  sections: (#struct){
-                    Formulare: (#struct){
-                      Section: (#struct){
-                        entries: (#struct){
-                          Fotodokumentation: (#struct){
-                            SingleForm: (#struct){
-                              formId: (string){ "fotodokumentation" }
-                              showNumberOfInstances?: (bool){ bool }
-                            }
-                            _json: (#list){
-                              0: (#struct){
-                                iDoc: (string){ "singleFormIDoc" }
-                                "X-FormId": (string){ "fotodokumentation" }
-                              }
-                            }
-                          }
-                        }
-                        display?: (string){ string }
-                      }
-                      _json: (#list){
-                        0: (#struct){
-                          Fotodokumentation: ~(tabcatsExample.config.tabcats."02".Section.entries.Dokumentation.Link.sections.Formulare.Section.entries.Fotodokumentation._json)
-                        }
-                      }
-                    }
-                  }
-                  icon?: (string){ string }
-                }
-                _json: (#list){
-                  0: (#struct){
-                    Formulare: ~(tabcatsExample.config.tabcats."02".Section.entries.Dokumentation.Link.sections.Formulare._json)
-                  }
-                }
-              }
-            }
-            display?: (string){ string }
-          }
-          _json: (#list){
-            0: (#struct){
-              Dokumentation: ~(tabcatsExample.config.tabcats."02".Section.entries.Dokumentation._json)
-            }
-          }
-        }
+        "02": ~(tabcatsExample._s)
       }
     }
     json: (#struct){
       tabcats: (#list){
         0: (#struct){
-          "02": ~(tabcatsExample.config.tabcats."02"._json)
+          "02": ~(tabcatsExample._s._json)
         }
       }
     }
@@ -581,7 +478,25 @@ diff old new
      _e1: (#struct){
        Link: (#struct){
          sections: (#struct){
-@@ -199,30 +88,16 @@
+@@ -182,47 +71,22 @@
+           Formulare: (#struct){
+             Section: (#struct){
+               entries: (#struct){
+-                Fotodokumentation: (#struct){
+-                  SingleForm: (#struct){
+-                    formId: (string){ "fotodokumentation" }
+-                    showNumberOfInstances?: (bool){ bool }
+-                  }
+-                  _json: (#list){
+-                    0: (#struct){
+-                      iDoc: (string){ "singleFormIDoc" }
+-                      "X-FormId": (string){ "fotodokumentation" }
+-                    }
+-                  }
+-                }
++                Fotodokumentation: ~(tabcatsExample._e2)
+               }
+               display?: (string){ string }
              }
              _json: (#list){
                0: (#struct){
@@ -609,7 +524,7 @@ diff old new
 -              }
 -            }
 -          }
-+                Fotodokumentation: ~(tabcatsExample._e1.Link.sections.Formulare.Section.entries.Fotodokumentation._json)
++                Fotodokumentation: ~(tabcatsExample._e2._json)
 +              }
 +            }
 +          }
@@ -622,32 +537,49 @@ diff old new
          }
        }
      }
-@@ -240,7 +115,6 @@
+@@ -240,76 +104,26 @@
      }
      _s: (#struct){
        Section: (#struct){
 -        display?: (string){ string }
          entries: (#struct){
-           Dokumentation: (#struct){
-             Link: (#struct){
-@@ -265,12 +139,7 @@
-                   }
-                   _json: (#list){
-                     0: (#struct){
+-          Dokumentation: (#struct){
+-            Link: (#struct){
+-              sections: (#struct){
+-                Formulare: (#struct){
+-                  Section: (#struct){
+-                    entries: (#struct){
+-                      Fotodokumentation: (#struct){
+-                        SingleForm: (#struct){
+-                          formId: (string){ "fotodokumentation" }
+-                          showNumberOfInstances?: (bool){ bool }
+-                        }
+-                        _json: (#list){
+-                          0: (#struct){
+-                            iDoc: (string){ "singleFormIDoc" }
+-                            "X-FormId": (string){ "fotodokumentation" }
+-                          }
+-                        }
+-                      }
+-                    }
+-                    display?: (string){ string }
+-                  }
+-                  _json: (#list){
+-                    0: (#struct){
 -                      Fotodokumentation: (#list){
 -                        0: (#struct){
 -                          iDoc: (string){ "singleFormIDoc" }
 -                          "X-FormId": (string){ "fotodokumentation" }
 -                        }
 -                      }
-+                      Fotodokumentation: ~(tabcatsExample._s.Section.entries.Dokumentation.Link.sections.Formulare.Section.entries.Fotodokumentation._json)
-                     }
-                   }
-                 }
-@@ -279,37 +148,75 @@
-             }
-             _json: (#list){
-               0: (#struct){
+-                    }
+-                  }
+-                }
+-              }
+-              icon?: (string){ string }
+-            }
+-            _json: (#list){
+-              0: (#struct){
 -                Formulare: (#list){
 -                  0: (#struct){
 -                    Fotodokumentation: (#list){
@@ -679,75 +611,25 @@ diff old new
 -              }
 -            }
 -          }
-+                Formulare: ~(tabcatsExample._s.Section.entries.Dokumentation.Link.sections.Formulare._json)
-+              }
-+            }
-+          }
++          Dokumentation: ~(tabcatsExample._e1)
 +        }
 +        display?: (string){ string }
 +      }
 +      _json: (#list){
 +        0: (#struct){
-+          Dokumentation: ~(tabcatsExample._s.Section.entries.Dokumentation._json)
++          Dokumentation: ~(tabcatsExample._e1._json)
 +        }
 +      }
 +    }
 +    config: (#struct){
 +      tabcats: (#struct){
-+        "02": (#struct){
-+          Section: (#struct){
-+            entries: (#struct){
-+              Dokumentation: (#struct){
-+                Link: (#struct){
-+                  sections: (#struct){
-+                    Formulare: (#struct){
-+                      Section: (#struct){
-+                        entries: (#struct){
-+                          Fotodokumentation: (#struct){
-+                            SingleForm: (#struct){
-+                              formId: (string){ "fotodokumentation" }
-+                              showNumberOfInstances?: (bool){ bool }
-+                            }
-+                            _json: (#list){
-+                              0: (#struct){
-+                                iDoc: (string){ "singleFormIDoc" }
-+                                "X-FormId": (string){ "fotodokumentation" }
-+                              }
-+                            }
-+                          }
-+                        }
-+                        display?: (string){ string }
-+                      }
-+                      _json: (#list){
-+                        0: (#struct){
-+                          Fotodokumentation: ~(tabcatsExample.config.tabcats."02".Section.entries.Dokumentation.Link.sections.Formulare.Section.entries.Fotodokumentation._json)
-+                        }
-+                      }
-+                    }
-+                  }
-+                  icon?: (string){ string }
-+                }
-+                _json: (#list){
-+                  0: (#struct){
-+                    Formulare: ~(tabcatsExample.config.tabcats."02".Section.entries.Dokumentation.Link.sections.Formulare._json)
-+                  }
-+                }
-+              }
-+            }
-+            display?: (string){ string }
-+          }
-+          _json: (#list){
-+            0: (#struct){
-+              Dokumentation: ~(tabcatsExample.config.tabcats."02".Section.entries.Dokumentation._json)
-+            }
-+          }
-+        }
++        "02": ~(tabcatsExample._s)
 +      }
 +    }
 +    json: (#struct){
 +      tabcats: (#list){
 +        0: (#struct){
-+          "02": ~(tabcatsExample.config.tabcats."02"._json)
++          "02": ~(tabcatsExample._s._json)
          }
        }
      }

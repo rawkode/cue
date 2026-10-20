@@ -546,9 +546,7 @@ Result:
     x: (#struct){
       c: (string){ "c" }
     }
-    y: (#struct){
-      c: (string){ "c" }
-    }
+    y: ~(issue3678.x)
   }
   issue3981: (struct){
     matchWithClose: (struct){
@@ -615,7 +613,7 @@ diff old new
        b: (int){ 1 }
      }
    }
-@@ -308,10 +306,10 @@
+@@ -308,23 +306,21 @@
            // }
          }
        }) }
@@ -623,14 +621,13 @@ diff old new
 -      c: (string){ "c" }
 -    }
 -    y: (struct){
+-      c: (string){ "c" }
+-    }
 +    x: (#struct){
 +      c: (string){ "c" }
 +    }
-+    y: (#struct){
-       c: (string){ "c" }
-     }
++    y: ~(issue3678.x)
    }
-@@ -318,13 +316,13 @@
    issue3981: (struct){
      matchWithClose: (struct){
        out: (#struct){

@@ -50,12 +50,7 @@ Disjuncts:    39
         }
       }
       _computed(:p): (#struct){
-        in: (#struct){
-          taxPayer: (#struct){
-            self: (#struct){
-            }
-          }
-        }
+        in: ~(assert.res.in)
       }
     }
   }
@@ -79,7 +74,7 @@ Disjuncts:    39
 diff old new
 --- old
 +++ new
-@@ -4,22 +4,16 @@
+@@ -4,60 +4,35 @@
      }
    }
    let sam#1 = (struct){
@@ -105,16 +100,15 @@ diff old new
            }
          }
        }
-@@ -26,7 +20,7 @@
        _computed(:p): (#struct){
-         in: (#struct){
-           taxPayer: (#struct){
+-        in: (#struct){
+-          taxPayer: (#struct){
 -            self: (struct){
-+            self: (#struct){
-             }
-           }
-         }
-@@ -34,30 +28,16 @@
+-            }
+-          }
+-        }
++        in: ~(assert.res.in)
+       }
      }
    }
    subject: (struct){

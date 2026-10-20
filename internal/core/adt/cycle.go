@@ -532,12 +532,15 @@ func (n *nodeContext) markNonCyclic(id CloseInfo) {
 	switch id.CycleType {
 	case NoCycle, IsOptional:
 		n.hasNonCyclic = true
+	case IsCyclic:
+		n.node.markCycleSensitive()
 	}
 }
 
 // markCyclic marks a conjunct as being cyclic. Also, it postpones processing
 // the conjunct in the absence of evidence of a non-cyclic conjunct.
 func (n *nodeContext) markCyclic(arc *Vertex, env *Environment, x Resolver, ci CloseInfo) (CloseInfo, bool) {
+	n.node.markCycleSensitive()
 	ci.CycleType = IsCyclic
 
 	n.hasAnyCyclicConjunct = true
@@ -554,6 +557,7 @@ func (n *nodeContext) markCyclic(arc *Vertex, env *Environment, x Resolver, ci C
 }
 
 func (n *nodeContext) markCyclicPath(arc *Vertex, env *Environment, x Resolver, ci CloseInfo) (CloseInfo, bool) {
+	n.node.markCycleSensitive()
 	ci.CycleType = IsCyclic
 
 	n.hasAnyCyclicConjunct = true
@@ -660,6 +664,7 @@ func assertStructuralCycle(n *nodeContext) bool {
 }
 
 func (n *nodeContext) reportCycleError() {
+	n.node.markCycleSensitive()
 	b := &Bottom{
 		Code:  StructuralCycleError,
 		Err:   n.ctx.Newf("structural cycle"),
@@ -715,4 +720,88 @@ func (n *nodeContext) markDepth() (saved int) {
 // See markDepth.
 func (n *nodeContext) unmarkDepth(saved int) {
 	n.evalDepth = saved
+}
+
+// markCycleSensitive preserves cycle evidence for enclosing values, including
+// after their descendants' nodeContexts have been reclaimed. Do not stop at an
+// already marked vertex: an overlay clone or a reparented shared value may have
+// acquired new ancestors since it was marked.
+func (v *Vertex) markCycleSensitive() {
+	for p := v; p != nil; p = p.Parent {
+		// Synthetic arcs used by API lookups can point into a completed,
+		// concurrently readable value. Their cycles belong to the new
+		// evaluation and must not mutate that immutable ancestor.
+		if p != v && p.status == finalized && (p.state == nil || p.state.refCount == 0) {
+			break
+		}
+		p.cycleSensitive = true
+	}
+}
+
+// followReferences returns the vertex that v stands for: v itself, or, if v
+// holds nothing but a single reference (and top), the arc that reference
+// names, followed transitively. An arc that is not such a reference, or a
+// self reference, ends the chain, which is bounded against loops of
+// references.
+//
+// Structure sharing would make such arcs dereference to their target
+// directly, but is disabled for non-rooted and dynamic targets and for
+// lets (see shareIfPossible and https://cuelang.org/issue/3801), which are
+// exactly the arcs compared here.
+func (c *OpContext) followReferences(v *Vertex) *Vertex {
+	for range 64 {
+		v = v.DerefValue()
+		var ref Conjunct
+		found := false
+		for x := range v.LeafConjuncts() {
+			if _, ok := x.Elem().(*Top); ok {
+				continue
+			}
+			if found {
+				return v
+			}
+			ref, found = x, true
+		}
+		if !found || ref.Env == nil {
+			return v
+		}
+		w := c.refTarget(ref.Env, ref.Expr())
+		if w == nil || w == v {
+			return v
+		}
+		v = w
+	}
+	return v
+}
+
+// refTarget returns the arc that the reference x names when evaluated in
+// env, found by looking it up in the scope it refers to, which neither
+// evaluates nor allocates. It is nil for an arc that does not exist yet and
+// for any expression that is not a field or let reference or a selection
+// from one: a selection from any other value would need its operand
+// evaluated, and so can the resolution of a ValueReference. A MultiLet also
+// yields nil: its raw arc holds only one comprehension iteration, whereas
+// resolution uses a copy for each environment.
+//
+
+func (c *OpContext) refTarget(env *Environment, x Expr) *Vertex {
+	var w *Vertex
+	switch r := x.(type) {
+	case *FieldReference:
+		if e := env.up(c, r.UpCount); e != nil {
+			w = e.DerefVertex(c).LookupRaw(r.Label)
+		}
+	case *LetReference:
+		if e := env.up(c, r.UpCount); e != nil {
+			w = e.DerefVertex(c).LookupRaw(r.Label)
+			if w != nil && w.MultiLet {
+				return nil
+			}
+		}
+	case *SelectorExpr:
+		if w = c.refTarget(env, r.X); w != nil {
+			w = c.followReferences(w).LookupRaw(r.Sel)
+		}
+	}
+	return w
 }

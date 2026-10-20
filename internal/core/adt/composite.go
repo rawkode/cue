@@ -223,6 +223,11 @@ type Vertex struct {
 	// The debug printer, for instance, takes extra care not to print in a loop.
 	IsShared bool
 
+	// cycleSensitive records structural cycle evidence even after a descendant's
+	// nodeContext is reclaimed. Such values may still depend on their ancestry
+	// and cannot establish reusable definition containment elsewhere.
+	cycleSensitive bool
+
 	// ArcType indicates the level of optionality of this arc.
 	ArcType ArcType
 
