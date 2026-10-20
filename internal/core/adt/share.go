@@ -187,7 +187,7 @@ func (n *nodeContext) shareIfPossible(c Conjunct, arc *Vertex, id CloseInfo) boo
 	// A forward reference may not have processed its definition yet, and so
 	// may not be marked recursively closed. Complete it before deciding
 	// whether it can be shared with the same definition at this destination.
-	if n.node.ClosedRecursive && !arc.ClosedRecursive {
+	if n.node.ClosedRecursive && !arc.ClosedRecursive && !inheritsRecursiveClose(arc) {
 		if !n.completeSharingTarget(arc, id) {
 			return false
 		}
@@ -388,4 +388,11 @@ func (v *Vertex) DerefNonShared() *Vertex {
 		}
 		v = arc
 	}
+}
+
+// inheritsRecursiveClose reports whether v is recursively closed by its
+// parent. Initialization marks such a vertex as ClosedRecursive (see initBare),
+// so this holds before an unevaluated forward reference has been initialized.
+func inheritsRecursiveClose(v *Vertex) bool {
+	return v.status == unprocessed && v.Parent != nil && v.Parent.ClosedRecursive
 }
