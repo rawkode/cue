@@ -31,7 +31,8 @@ package adt
 // Maybe this is okay, though, as #Def itself can be shared, at least.
 
 // sharedConjunct retains the original reference for replay if sharing stops.
-// Different references may share one target when one includes the other.
+// Different references may share one target when one includes the other. A
+// nil arc marks a type constraint that is replayed as an ordinary conjunct.
 type sharedConjunct struct {
 	c   Conjunct
 	arc *Vertex
@@ -53,6 +54,11 @@ func (n *nodeContext) unshare() {
 	n.node.BaseValue = n.origBaseValue
 
 	for _, x := range n.sharedConjuncts {
+		if x.arc == nil {
+			// A type constraint absorbed by shareTypedReference.
+			n.scheduleConjunct(x.c, x.id)
+			continue
+		}
 		n.scheduleVertexConjuncts(x.c, x.arc, x.id)
 	}
 

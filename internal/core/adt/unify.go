@@ -108,6 +108,10 @@ func (n *nodeContext) scheduleConjuncts() {
 
 	defer ctx.PopArc(ctx.PushArc(v))
 
+	if n.shareTypedReference() {
+		return
+	}
+
 	for i, c := range v.Conjuncts {
 		_ = i // for debugging purposes
 		ci := c.CloseInfo

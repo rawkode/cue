@@ -224,18 +224,18 @@ issue3903: noshare: {
 	}
 }
 -- out/evalalpha/stats --
-Leaks:  7
-Freed:  225
-Reused: 201
-Allocs: 31
+Leaks:  9
+Freed:  227
+Reused: 203
+Allocs: 33
 Retain: 0
 
-Unifications: 220
-Conjuncts:    393
+Unifications: 224
+Conjuncts:    403
 Disjuncts:    6
 Notifications: 1
 
-NumCloseIDs: 95
+NumCloseIDs: 99
 -- diff/-out/evalalpha/stats<==>+out/eval/stats --
 diff old new
 --- old
@@ -254,18 +254,18 @@ diff old new
 -MisalignedConjunct: 36
 -
 -NumCloseIDs: 7
-+Leaks:  7
-+Freed:  225
-+Reused: 201
-+Allocs: 31
++Leaks:  9
++Freed:  227
++Reused: 203
++Allocs: 33
 +Retain: 0
 +
-+Unifications: 220
-+Conjuncts:    393
++Unifications: 224
++Conjuncts:    403
 +Disjuncts:    6
 +Notifications: 1
 +
-+NumCloseIDs: 95
++NumCloseIDs: 99
 -- out/eval/stats --
 Leaks:  6
 Freed:  272

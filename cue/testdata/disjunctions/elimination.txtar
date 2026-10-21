@@ -677,17 +677,17 @@ issue2685: {
 }
 -- out/evalalpha/stats --
 Leaks:  216
-Freed:  2559
-Reused: 2520
+Freed:  2554
+Reused: 2515
 Allocs: 255
 Retain: 0
 
-Unifications: 665
-Conjuncts:    2759
-Disjuncts:    1300
+Unifications: 662
+Conjuncts:    2749
+Disjuncts:    1298
 Notifications: 4
 
-NumCloseIDs: 316
+NumCloseIDs: 314
 -- diff/-out/evalalpha/stats<==>+out/eval/stats --
 diff old new
 --- old
@@ -707,17 +707,17 @@ diff old new
 -
 -NumCloseIDs: 10
 +Leaks:  216
-+Freed:  2559
-+Reused: 2520
++Freed:  2554
++Reused: 2515
 +Allocs: 255
 +Retain: 0
 +
-+Unifications: 665
-+Conjuncts:    2759
-+Disjuncts:    1300
++Unifications: 662
++Conjuncts:    2749
++Disjuncts:    1298
 +Notifications: 4
 +
-+NumCloseIDs: 316
++NumCloseIDs: 314
 -- out/eval/stats --
 Leaks:  9
 Freed:  2856
@@ -1692,14 +1692,7 @@ issue770: new evaluator fixes a bug in "c" and "coo" where defaults did not appl
   issue3528: (struct){
     original: (struct){
       workflows: (#list){
-        0: (#struct){
-          container: (#struct){
-          }
-          #container: ((string|struct)){ |((string){ string }, (#struct){
-              volumes?: (list){
-              }
-            }) }
-        }
+        0: ~(issue3528.original.test)
       }
       test: (#struct){
         container: (#struct){
@@ -1903,6 +1896,22 @@ diff old new
    issue3149: (struct){
      #valid: (#struct){
        name!: (string){ |((string){ &(=~"^Foo", =~"Foo$") }, (string){ "an exception" }) }
+@@ -939,14 +949,7 @@
+   issue3528: (struct){
+     original: (struct){
+       workflows: (#list){
+-        0: (#struct){
+-          container: (#struct){
+-          }
+-          #container: ((string|struct)){ |((string){ string }, (#struct){
+-              volumes?: (list){
+-              }
+-            }) }
+-        }
++        0: ~(issue3528.original.test)
+       }
+       test: (#struct){
+         container: (#struct){
 -- out/eval --
 (struct){
   disambiguateClosed: (struct){

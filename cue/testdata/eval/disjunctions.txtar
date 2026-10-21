@@ -319,20 +319,20 @@ issue3891: full: {
 	}
 }
 -- out/evalalpha/stats --
-Leaks:  101
-Freed:  574
-Reused: 531
-Allocs: 144
+Leaks:  100
+Freed:  562
+Reused: 519
+Allocs: 143
 Retain: 0
 
-Unifications: 294
-Conjuncts:    810
-Disjuncts:    241
+Unifications: 291
+Conjuncts:    795
+Disjuncts:    237
 Notifications: 1
 
-NumCloseIDs: 132
+NumCloseIDs: 127
 
-ConjunctInfos:       415
+ConjunctInfos:       406
 MaxConjunctInfos:    6
 MaxReqSets:          7
 MaxRedirect:         2
@@ -354,20 +354,20 @@ diff old new
 -MisalignedConjunct: 2
 -
 -NumCloseIDs: 2
-+Leaks:  101
-+Freed:  574
-+Reused: 531
-+Allocs: 144
++Leaks:  100
++Freed:  562
++Reused: 519
++Allocs: 143
 +Retain: 0
 +
-+Unifications: 294
-+Conjuncts:    810
-+Disjuncts:    241
++Unifications: 291
++Conjuncts:    795
++Disjuncts:    237
 +Notifications: 1
 +
-+NumCloseIDs: 132
++NumCloseIDs: 127
 +
-+ConjunctInfos:       415
++ConjunctInfos:       406
 +MaxConjunctInfos:    6
 +MaxReqSets:          7
 +MaxRedirect:         2

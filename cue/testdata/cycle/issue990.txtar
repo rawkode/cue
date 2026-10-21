@@ -80,19 +80,19 @@ out: #sub & {#p: _test.s1}
 -- diff/todo/p3 --
 Reordering
 -- out/evalalpha/stats --
-Leaks:  91
-Freed:  371
-Reused: 342
-Allocs: 120
+Leaks:  46
+Freed:  208
+Reused: 179
+Allocs: 75
 Retain: 0
 
-Unifications: 208
-Conjuncts:    759
-Disjuncts:    52
+Unifications: 148
+Conjuncts:    432
+Disjuncts:    22
 
-NumCloseIDs: 213
+NumCloseIDs: 121
 
-ConjunctInfos:       550
+ConjunctInfos:       334
 MaxConjunctInfos:    4
 MaxReqSets:          19
 MaxRedirect:         4
@@ -143,12 +143,7 @@ MaxRedirect:         4
         n: (string){ "s3" }
         r: (#struct){
           r1: (#struct){
-            a: (#struct){
-              d: (#struct){
-                n: (string){ "c1" }
-              }
-              k: (string){ "simple" }
-            }
+            a: ~(_test.c1)
           }
         }
       }
@@ -159,30 +154,10 @@ MaxRedirect:         4
         n: (string){ "s2" }
         r: (#struct){
           r1: (#struct){
-            a: (#struct){
-              d: (#struct){
-                n: (string){ "c1" }
-              }
-              k: (string){ "simple" }
-            }
+            a: ~(_test.c1)
           }
           r2: (#struct){
-            a: (#struct){
-              d: (#struct){
-                n: (string){ "s3" }
-                r: (#struct){
-                  r1: (#struct){
-                    a: (#struct){
-                      d: (#struct){
-                        n: (string){ "c1" }
-                      }
-                      k: (string){ "simple" }
-                    }
-                  }
-                }
-              }
-              k: (string){ "complex" }
-            }
+            a: ~(_test.s3)
           }
         }
       }
@@ -193,48 +168,10 @@ MaxRedirect:         4
         n: (string){ "s1" }
         r: (#struct){
           r1: (#struct){
-            a: (#struct){
-              d: (#struct){
-                n: (string){ "c1" }
-              }
-              k: (string){ "simple" }
-            }
+            a: ~(_test.c1)
           }
           r2: (#struct){
-            a: (#struct){
-              d: (#struct){
-                n: (string){ "s2" }
-                r: (#struct){
-                  r1: (#struct){
-                    a: (#struct){
-                      d: (#struct){
-                        n: (string){ "c1" }
-                      }
-                      k: (string){ "simple" }
-                    }
-                  }
-                  r2: (#struct){
-                    a: (#struct){
-                      d: (#struct){
-                        n: (string){ "s3" }
-                        r: (#struct){
-                          r1: (#struct){
-                            a: (#struct){
-                              d: (#struct){
-                                n: (string){ "c1" }
-                              }
-                              k: (string){ "simple" }
-                            }
-                          }
-                        }
-                      }
-                      k: (string){ "complex" }
-                    }
-                  }
-                }
-              }
-              k: (string){ "complex" }
-            }
+            a: ~(_test.s2)
           }
         }
       }
@@ -322,19 +259,19 @@ diff old new
 -MisalignedConjunct: 4502
 -
 -NumCloseIDs: 4
-+Leaks:  91
-+Freed:  371
-+Reused: 342
-+Allocs: 120
++Leaks:  46
++Freed:  208
++Reused: 179
++Allocs: 75
 +Retain: 0
 +
-+Unifications: 208
-+Conjuncts:    759
-+Disjuncts:    52
++Unifications: 148
++Conjuncts:    432
++Disjuncts:    22
 +
-+NumCloseIDs: 213
++NumCloseIDs: 121
 +
-+ConjunctInfos:       550
++ConjunctInfos:       334
 +MaxConjunctInfos:    4
 +MaxReqSets:          19
 +MaxRedirect:         4
@@ -394,7 +331,7 @@ diff old new
      dict: (#struct){
      }
      let subs#1multi = (〈3;#sub〉 & {
-@@ -53,192 +34,171 @@
+@@ -53,192 +34,108 @@
    }
    _test: (struct){
      c1: (#struct){
@@ -410,7 +347,7 @@ diff old new
          n: (string){ "s3" }
          r: (#struct){
            r1: (#struct){
-             a: (#struct){
+-            a: (#struct){
 -              k: (string){ "simple" }
 -              d: (#struct){
 -                n: (string){ "c1" }
@@ -419,11 +356,7 @@ diff old new
 -          }
 -        }
 -      }
-+              d: (#struct){
-+                n: (string){ "c1" }
-+              }
-+              k: (string){ "simple" }
-+            }
++            a: ~(_test.c1)
 +          }
 +        }
 +      }
@@ -435,7 +368,7 @@ diff old new
          n: (string){ "s2" }
          r: (#struct){
            r1: (#struct){
-             a: (#struct){
+-            a: (#struct){
 -              k: (string){ "simple" }
 -              d: (#struct){
 -                n: (string){ "c1" }
@@ -445,19 +378,11 @@ diff old new
 -          r2: (#struct){
 -            a: (#struct){
 -              k: (string){ "complex" }
-+              d: (#struct){
-+                n: (string){ "c1" }
-+              }
-+              k: (string){ "simple" }
-+            }
-+          }
-+          r2: (#struct){
-+            a: (#struct){
-               d: (#struct){
-                 n: (string){ "s3" }
-                 r: (#struct){
-                   r1: (#struct){
-                     a: (#struct){
+-              d: (#struct){
+-                n: (string){ "s3" }
+-                r: (#struct){
+-                  r1: (#struct){
+-                    a: (#struct){
 -                      k: (string){ "simple" }
 -                      d: (#struct){
 -                        n: (string){ "c1" }
@@ -470,16 +395,10 @@ diff old new
 -          }
 -        }
 -      }
-+                      d: (#struct){
-+                        n: (string){ "c1" }
-+                      }
-+                      k: (string){ "simple" }
-+                    }
-+                  }
-+                }
-+              }
-+              k: (string){ "complex" }
-+            }
++            a: ~(_test.c1)
++          }
++          r2: (#struct){
++            a: ~(_test.s3)
 +          }
 +        }
 +      }
@@ -540,48 +459,10 @@ diff old new
 +        n: (string){ "s1" }
 +        r: (#struct){
 +          r1: (#struct){
-+            a: (#struct){
-+              d: (#struct){
-+                n: (string){ "c1" }
-+              }
-+              k: (string){ "simple" }
-+            }
++            a: ~(_test.c1)
 +          }
 +          r2: (#struct){
-+            a: (#struct){
-+              d: (#struct){
-+                n: (string){ "s2" }
-+                r: (#struct){
-+                  r1: (#struct){
-+                    a: (#struct){
-+                      d: (#struct){
-+                        n: (string){ "c1" }
-+                      }
-+                      k: (string){ "simple" }
-+                    }
-+                  }
-+                  r2: (#struct){
-+                    a: (#struct){
-+                      d: (#struct){
-+                        n: (string){ "s3" }
-+                        r: (#struct){
-+                          r1: (#struct){
-+                            a: (#struct){
-+                              d: (#struct){
-+                                n: (string){ "c1" }
-+                              }
-+                              k: (string){ "simple" }
-+                            }
-+                          }
-+                        }
-+                      }
-+                      k: (string){ "complex" }
-+                    }
-+                  }
-+                }
-+              }
-+              k: (string){ "complex" }
-+            }
++            a: ~(_test.s2)
 +          }
 +        }
 +      }

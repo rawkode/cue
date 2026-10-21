@@ -132,6 +132,10 @@ type OpContext struct {
 	Runtime
 	Format func(Runtime, Node) string
 
+	// disjointDefs caches whether two definitions cannot be unified; see
+	// shareTypedReference.
+	disjointDefs map[defPair]disjointResult
+
 	cuedebug.Config
 	Version internal.EvaluatorVersion // Copied from Runtime
 

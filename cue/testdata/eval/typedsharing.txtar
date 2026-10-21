@@ -1,0 +1,539 @@
+# Typed references to final values are shared when the type resolves to the
+# referenced value: the value was constrained by one of the definitions of the
+# type, and each other definition cannot be unified with it. These cases check
+# that results do not change where this does not hold.
+-- in.cue --
+// A value that embeds a definition is not closed by it.
+embedded: {
+	#A: {a?: int, deps?: [...#N]}
+	#B: {b!: string, deps?: [...#N]}
+	#N: #A | #B
+	x: {#A, extra: 1}
+	y: #A & {a: 1}
+	l: [...#N]
+	l: [x, y]
+}
+
+// A default of the referenced value is not a hard constraint.
+defaults: {
+	#A: {kind: "a", f: *"a" | string, deps?: [...#N]}
+	#B: {kind: "b", deps?: [...#N]}
+	#N: #A | #B
+	t: [string]: #N
+	t: {
+		p: {kind: "a"}
+		q: {kind: "a", f: "z", deps: [p]}
+	}
+	l: [...#N]
+	l: [t.p, t.q]
+}
+
+// Definitions that are not disjoint keep the disjunction.
+ambiguous: {
+	#A: {x?: int}
+	#B: {y?: int}
+	#N: #A | #B
+	v: #A & {}
+	l: [...#N]
+	l: [v]
+}
+
+// Closedness errors of a dependency are reported at each reference.
+closed: {
+	#T: {cmd: string, deps?: [...(#T | #G)]}
+	#G: {type: "group", deps?: [...(#T | #G)]}
+	tasks: [string]: #T | #G
+	tasks: {
+		a: {cmd: "x"}
+		b: {cmd: "x", deps: [a]}
+		c: {cmd: "x", deps: [b], bogus: 1}
+		d: {cmd: "x", deps: [c]}
+	}
+}
+
+// Forward references are shared once their target is complete.
+forward: {
+	#T: {cmd: string, out: string | *"default", deps?: [...(#T | #G)]}
+	#G: {type: "group", deps?: [...(#T | #G)]}
+	tasks: [string]: #T | #G
+	tasks: {
+		d: {cmd: "x", deps: [c]}
+		c: {cmd: "x", deps: [b], out: "c"}
+		b: {cmd: "x", deps: [a]}
+		a: {cmd: "x"}
+		g: {type: "group", deps: [d, a]}
+	}
+}
+
+// A self-reference is not shared.
+self: {
+	#A: y: string
+	#B: x: #A
+	#C: {
+		x: #A
+		v: #B & {x: x}
+	}
+	config: #C & {x: y: "dev"}
+}
+-- out/evalalpha --
+Errors:
+closed.tasks.c: 2 errors in empty disjunction:
+closed.tasks.c.bogus: field not allowed:
+    ./in.cue:44:28
+closed.tasks.c.cmd: field not allowed:
+    ./in.cue:44:7
+closed.tasks.d: 4 errors in empty disjunction:
+closed.tasks.d.deps.0: 3 errors in empty disjunction:
+closed.tasks.d.deps.0.bogus: field not allowed:
+    ./in.cue:44:28
+closed.tasks.d.deps.0.cmd: field not allowed:
+    ./in.cue:38:7
+    ./in.cue:44:7
+closed.tasks.d.deps.0.type: field not allowed:
+    ./in.cue:39:7
+embedded.l.0: 2 errors in empty disjunction:
+embedded.l.0.b: field not allowed:
+    ./in.cue:4:7
+embedded.l.0.extra: field not allowed:
+    ./in.cue:6:10
+
+Result:
+(_|_){
+  // [eval]
+  embedded: (_|_){
+    // [eval]
+    #A: (#struct){
+      a?: (int){ int }
+      deps?: (list){
+      }
+    }
+    #B: (#struct){
+      b!: (string){ string }
+      deps?: (list){
+      }
+    }
+    #N: (#struct){ |((#struct){
+        a?: (int){ int }
+        deps?: (list){
+        }
+      }, (#struct){
+        b!: (string){ string }
+        deps?: (list){
+        }
+      }) }
+    x: (#struct){
+      extra: (int){ 1 }
+      a?: (int){ int }
+      deps?: (list){
+      }
+    }
+    y: (#struct){
+      a: (int){ 1 }
+      deps?: (list){
+      }
+    }
+    l: (_|_){
+      // [eval]
+      0: (_|_){
+        // [eval] embedded.l.0: 2 errors in empty disjunction:
+        // embedded.l.0.b: field not allowed:
+        //     ./in.cue:4:7
+        // embedded.l.0.extra: field not allowed:
+        //     ./in.cue:6:10
+        extra: (int){ 1 }
+        a?: (int){ int }
+        deps?: (list){ list }
+      }
+      1: ~(embedded.y)
+    }
+  }
+  defaults: (struct){
+    #A: (#struct){
+      kind: (string){ "a" }
+      f: (string){ |(*(string){ "a" }, (string){ string }) }
+      deps?: (list){
+      }
+    }
+    #B: (#struct){
+      kind: (string){ "b" }
+      deps?: (list){
+      }
+    }
+    #N: (#struct){ |((#struct){
+        kind: (string){ "a" }
+        f: (string){ |(*(string){ "a" }, (string){ string }) }
+        deps?: (list){
+        }
+      }, (#struct){
+        kind: (string){ "b" }
+        deps?: (list){
+        }
+      }) }
+    t: (struct){
+      p: (#struct){
+        kind: (string){ "a" }
+        f: (string){ |(*(string){ "a" }, (string){ string }) }
+        deps?: (list){
+        }
+      }
+      q: (#struct){
+        kind: (string){ "a" }
+        f: (string){ "z" }
+        deps: (#list){
+          0: ~(defaults.t.p)
+        }
+      }
+    }
+    l: (#list){
+      0: ~(defaults.t.p)
+      1: ~(defaults.t.q)
+    }
+  }
+  ambiguous: (struct){
+    #A: (#struct){
+      x?: (int){ int }
+    }
+    #B: (#struct){
+      y?: (int){ int }
+    }
+    #N: (#struct){ |((#struct){
+        x?: (int){ int }
+      }, (#struct){
+        y?: (int){ int }
+      }) }
+    v: (#struct){
+      x?: (int){ int }
+    }
+    l: (#list){
+      0: (#struct){ |((#struct){
+          x?: (int){ int }
+        }, (#struct){
+          x?: (_|_){
+            // [eval] ambiguous.l.0.x: field not allowed:
+            //     ./in.cue:28:7
+          }
+          y?: (_|_){
+            // [eval] ambiguous.l.0.y: field not allowed:
+            //     ./in.cue:29:7
+          }
+        }) }
+    }
+  }
+  closed: (_|_){
+    // [eval]
+    #T: (#struct){
+      cmd: (string){ string }
+      deps?: (list){
+      }
+    }
+    #G: (#struct){
+      type: (string){ "group" }
+      deps?: (list){
+      }
+    }
+    tasks: (_|_){
+      // [eval]
+      a: (#struct){
+        cmd: (string){ "x" }
+        deps?: (list){
+        }
+      }
+      b: (#struct){
+        cmd: (string){ "x" }
+        deps: (#list){
+          0: ~(closed.tasks.a)
+        }
+      }
+      c: (_|_){
+        // [eval] closed.tasks.c: 2 errors in empty disjunction:
+        // closed.tasks.c.bogus: field not allowed:
+        //     ./in.cue:44:28
+        // closed.tasks.c.cmd: field not allowed:
+        //     ./in.cue:44:7
+        cmd: (string){ "x" }
+        deps: (list){ list }
+        bogus: (int){ 1 }
+      }
+      d: (_|_){
+        // [eval] closed.tasks.d: 4 errors in empty disjunction:
+        // closed.tasks.d.deps.0: 3 errors in empty disjunction:
+        // closed.tasks.d.deps.0.bogus: field not allowed:
+        //     ./in.cue:44:28
+        // closed.tasks.d.deps.0.cmd: field not allowed:
+        //     ./in.cue:38:7
+        //     ./in.cue:44:7
+        // closed.tasks.d.deps.0.type: field not allowed:
+        //     ./in.cue:39:7
+        cmd: (string){ "x" }
+        deps: (list){ list }
+      }
+    }
+  }
+  forward: (struct){
+    #T: (#struct){
+      cmd: (string){ string }
+      out: (string){ |(*(string){ "default" }, (string){ string }) }
+      deps?: (list){
+      }
+    }
+    #G: (#struct){
+      type: (string){ "group" }
+      deps?: (list){
+      }
+    }
+    tasks: (struct){
+      d: (#struct){
+        cmd: (string){ "x" }
+        deps: (#list){
+          0: ~(forward.tasks.c)
+        }
+        out: (string){ |(*(string){ "default" }, (string){ string }) }
+      }
+      c: (#struct){
+        cmd: (string){ "x" }
+        deps: (#list){
+          0: ~(forward.tasks.b)
+        }
+        out: (string){ "c" }
+      }
+      b: (#struct){
+        cmd: (string){ "x" }
+        deps: (#list){
+          0: ~(forward.tasks.a)
+        }
+        out: (string){ |(*(string){ "default" }, (string){ string }) }
+      }
+      a: (#struct){
+        cmd: (string){ "x" }
+        out: (string){ |(*(string){ "default" }, (string){ string }) }
+        deps?: (list){
+        }
+      }
+      g: (#struct){
+        type: (string){ "group" }
+        deps: (#list){
+          0: ~(forward.tasks.d)
+          1: ~(forward.tasks.a)
+        }
+      }
+    }
+  }
+  self: (struct){
+    #A: (#struct){
+      y: (string){ string }
+    }
+    #B: (#struct){
+      x: ~(self.#A)
+    }
+    #C: (#struct){
+      x: ~(self.#A)
+      v: (#struct){
+        x: ~(self.#A)
+      }
+    }
+    config: (#struct){
+      x: (#struct){
+        y: (string){ "dev" }
+      }
+      v: (#struct){
+        x: ~(self.#A)
+      }
+    }
+  }
+}
+-- out/compile --
+--- in.cue
+{
+  embedded: {
+    #A: {
+      a?: int
+      deps?: [
+        ...〈2;#N〉,
+      ]
+    }
+    #B: {
+      b!: string
+      deps?: [
+        ...〈2;#N〉,
+      ]
+    }
+    #N: (〈0;#A〉|〈0;#B〉)
+    x: {
+      〈1;#A〉
+      extra: 1
+    }
+    y: (〈0;#A〉 & {
+      a: 1
+    })
+    l: [
+      ...〈1;#N〉,
+    ]
+    l: [
+      〈1;x〉,
+      〈1;y〉,
+    ]
+  }
+  defaults: {
+    #A: {
+      kind: "a"
+      f: (*"a"|string)
+      deps?: [
+        ...〈2;#N〉,
+      ]
+    }
+    #B: {
+      kind: "b"
+      deps?: [
+        ...〈2;#N〉,
+      ]
+    }
+    #N: (〈0;#A〉|〈0;#B〉)
+    t: {
+      [string]: 〈1;#N〉
+    }
+    t: {
+      p: {
+        kind: "a"
+      }
+      q: {
+        kind: "a"
+        f: "z"
+        deps: [
+          〈2;p〉,
+        ]
+      }
+    }
+    l: [
+      ...〈1;#N〉,
+    ]
+    l: [
+      〈1;t〉.p,
+      〈1;t〉.q,
+    ]
+  }
+  ambiguous: {
+    #A: {
+      x?: int
+    }
+    #B: {
+      y?: int
+    }
+    #N: (〈0;#A〉|〈0;#B〉)
+    v: (〈0;#A〉 & {})
+    l: [
+      ...〈1;#N〉,
+    ]
+    l: [
+      〈1;v〉,
+    ]
+  }
+  closed: {
+    #T: {
+      cmd: string
+      deps?: [
+        ...(〈2;#T〉|〈2;#G〉),
+      ]
+    }
+    #G: {
+      type: "group"
+      deps?: [
+        ...(〈2;#T〉|〈2;#G〉),
+      ]
+    }
+    tasks: {
+      [string]: (〈1;#T〉|〈1;#G〉)
+    }
+    tasks: {
+      a: {
+        cmd: "x"
+      }
+      b: {
+        cmd: "x"
+        deps: [
+          〈2;a〉,
+        ]
+      }
+      c: {
+        cmd: "x"
+        deps: [
+          〈2;b〉,
+        ]
+        bogus: 1
+      }
+      d: {
+        cmd: "x"
+        deps: [
+          〈2;c〉,
+        ]
+      }
+    }
+  }
+  forward: {
+    #T: {
+      cmd: string
+      out: (string|*"default")
+      deps?: [
+        ...(〈2;#T〉|〈2;#G〉),
+      ]
+    }
+    #G: {
+      type: "group"
+      deps?: [
+        ...(〈2;#T〉|〈2;#G〉),
+      ]
+    }
+    tasks: {
+      [string]: (〈1;#T〉|〈1;#G〉)
+    }
+    tasks: {
+      d: {
+        cmd: "x"
+        deps: [
+          〈2;c〉,
+        ]
+      }
+      c: {
+        cmd: "x"
+        deps: [
+          〈2;b〉,
+        ]
+        out: "c"
+      }
+      b: {
+        cmd: "x"
+        deps: [
+          〈2;a〉,
+        ]
+      }
+      a: {
+        cmd: "x"
+      }
+      g: {
+        type: "group"
+        deps: [
+          〈2;d〉,
+          〈2;a〉,
+        ]
+      }
+    }
+  }
+  self: {
+    #A: {
+      y: string
+    }
+    #B: {
+      x: 〈1;#A〉
+    }
+    #C: {
+      x: 〈1;#A〉
+      v: (〈1;#B〉 & {
+        x: 〈0;x〉
+      })
+    }
+    config: (〈0;#C〉 & {
+      x: {
+        y: "dev"
+      }
+    })
+  }
+}

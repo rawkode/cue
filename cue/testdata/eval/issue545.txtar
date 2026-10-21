@@ -36,42 +36,40 @@ t2: {
 	f: d & e & d & e
 }
 -- out/evalalpha/stats --
-Leaks:  7
-Freed:  62
-Reused: 41
-Allocs: 28
+Leaks:  4
+Freed:  48
+Reused: 34
+Allocs: 18
 Retain: 0
 
-Unifications: 29
-Conjuncts:    79
-Disjuncts:    16
-Notifications: 3
+Unifications: 28
+Conjuncts:    66
+Disjuncts:    8
 
-NumCloseIDs: 22
+NumCloseIDs: 19
 -- diff/-out/evalalpha/stats<==>+out/eval/stats --
 diff old new
 --- old
 +++ new
-@@ -1,9 +1,12 @@
+@@ -1,9 +1,11 @@
 -Leaks:  0
 -Freed:  121
 -Reused: 107
 -Allocs: 14
-+Leaks:  7
-+Freed:  62
-+Reused: 41
-+Allocs: 28
++Leaks:  4
++Freed:  48
++Reused: 34
++Allocs: 18
  Retain: 0
  
 -Unifications: 65
 -Conjuncts:    205
 -Disjuncts:    121
-+Unifications: 29
-+Conjuncts:    79
-+Disjuncts:    16
-+Notifications: 3
++Unifications: 28
++Conjuncts:    66
++Disjuncts:    8
 +
-+NumCloseIDs: 22
++NumCloseIDs: 19
 -- out/eval/stats --
 Leaks:  0
 Freed:  121
@@ -98,12 +96,7 @@ Disjuncts:    121
       #USER: (string){ strings.MinRunes(3) }
     }
     bar: (#struct){
-      source: (#struct){
-        source: (string){ "http://blablabla" }
-        #HTTP: (string){ =~"^http://" }
-        #SSH: (string){ !~"^ssh://" }
-        #USER: (string){ strings.MinRunes(3) }
-      }
+      source: ~(t1.foo)
       #HTTP: (string){ =~"^http://" }
       #SSH: (string){ !~"^ssh://" }
       #USER: (string){ strings.MinRunes(3) }
@@ -123,7 +116,7 @@ Disjuncts:    121
 diff old new
 --- old
 +++ new
-@@ -7,21 +7,21 @@
+@@ -7,21 +7,16 @@
        source: (string){ |((string){ =~"^http://" }, (string){ !~"^ssh://" }, (string){ strings.MinRunes(3) }) }
      }
      foo: (#struct){
@@ -139,13 +132,13 @@ diff old new
 -      #HTTP: (string){ =~"^http://" }
 -      #SSH: (string){ !~"^ssh://" }
 -      #USER: (string){ strings.MinRunes(3) }
-       source: (#struct){
-+        source: (string){ "http://blablabla" }
-         #HTTP: (string){ =~"^http://" }
-         #SSH: (string){ !~"^ssh://" }
-         #USER: (string){ strings.MinRunes(3) }
+-      source: (#struct){
+-        #HTTP: (string){ =~"^http://" }
+-        #SSH: (string){ !~"^ssh://" }
+-        #USER: (string){ strings.MinRunes(3) }
 -        source: (string){ "http://blablabla" }
-       }
+-      }
++      source: ~(t1.foo)
 +      #HTTP: (string){ =~"^http://" }
 +      #SSH: (string){ !~"^ssh://" }
 +      #USER: (string){ strings.MinRunes(3) }

@@ -61,6 +61,81 @@ func TestRecursiveSharingComplexity(t *testing.T) {
 	}
 }
 
+// Typed references should be shared when the referenced value was declared
+// with one of the definitions of the type. The tasks are declared through a
+// disjunction and their dependencies are typed with a union of definitions,
+// as is common in configuration schemas; replaying each dependency into every
+// disjunct of the union makes evaluation exponential in the depth of the graph.
+func TestTypedReferenceSharingComplexity(t *testing.T) {
+	for _, order := range []string{"ascending", "reverse", "mixed"} {
+		t.Run(order, func(t *testing.T) {
+			for _, depth := range []int{2, 4, 8, 16, 32} {
+				ctx, v := evalRecursiveSharing(t, typedReferenceSharingSource(order, depth))
+				counts := *ctx.Stats()
+				t.Logf("depth %d: %d unifications, %d disjuncts", depth, counts.Unifications, counts.Disjuncts)
+				budget := int64(64 * (depth + 1))
+				if counts.Unifications > budget || counts.Disjuncts > budget {
+					t.Fatalf("depth %d: evaluation exceeds linear budget %d: %d unifications, %d disjuncts",
+						depth, budget, counts.Unifications, counts.Disjuncts)
+				}
+				if b := adt.Validate(ctx, v, &adt.ValidateConfig{Concrete: true}); b != nil {
+					t.Fatalf("depth %d: unexpected evaluation error: %v", depth, b.Err)
+				}
+			}
+		})
+	}
+}
+
+func typedReferenceSharingSource(order string, depth int) string {
+	var src strings.Builder
+	src.WriteString(`#T: {
+	type?: _|_
+	cmd?: string
+	script?: string
+	({cmd!: string, script?: _|_} | {script!: string, cmd?: _|_})
+	env?: [string]: string | {secret: string}
+	deps?: [...#N]
+}
+#G: {
+	type: "group"
+	deps?: [...#N]
+	[!~"^(type|deps)$"]: #T | #G
+}
+#S: [...#N]
+#N: #T | #G | #S
+tasks: [n=string]: ((#T | #G) & {_self: n}) | #S
+tasks: {
+`)
+	var fields []string
+	for i := 0; i <= depth; i++ {
+		field := fmt.Sprintf("\tn%d: {cmd: \"x\"", i)
+		if i > 0 {
+			field += fmt.Sprintf(", deps: [n%d]", i-1)
+		}
+		fields = append(fields, field+"}\n")
+	}
+	switch order {
+	case "reverse":
+		slices.Reverse(fields)
+	case "mixed":
+		var mixed []string
+		for len(fields) > 0 {
+			mixed = append(mixed, fields[len(fields)-1])
+			fields = fields[:len(fields)-1]
+			if len(fields) > 0 {
+				mixed = append(mixed, fields[0])
+				fields = fields[1:]
+			}
+		}
+		fields = mixed
+	}
+	for _, field := range fields {
+		src.WriteString(field)
+	}
+	src.WriteString("}\n")
+	return src.String()
+}
+
 // Untyped references inside a closed definition should be shared even when
 // the referenced field has not been evaluated yet. The pipeline precedes the
 // tasks it references, and each task is a disjunct of the task pattern, so
