@@ -435,6 +435,23 @@ func (n *nodeContext) processComprehension(d *envYield, state vertexStatus) *Bot
 	return nil
 }
 
+// ForSource returns what a for clause with source x iterates over in env, or nil if
+// that cannot be determined.
+func (c *OpContext) ForSource(env *Environment, x Expr) *Vertex {
+	saved := c.PushState(env, x.Source())
+	v := c.forSource(x)
+	if c.PopState(saved) != nil {
+		return nil
+	}
+	return v
+}
+
+// ValueEnvironment returns the Environment in which the value of c is evaluated
+// for the result env of its clauses.
+func (c *Comprehension) ValueEnvironment(env *Environment) *Environment {
+	return linkChildren(env, c)
+}
+
 // linkChildren adds environments for the chain of vertices to a result
 // environment.
 func linkChildren(env *Environment, c *Comprehension) *Environment {
