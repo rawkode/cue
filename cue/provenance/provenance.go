@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/internal/core/adt"
@@ -56,6 +57,11 @@ const (
 	// Presence means only the existence of the target and the names of its
 	// fields are used: a for source, len and a comparison with bottom.
 	Presence
+
+	// Alternatives means the field is its own target: more than one arm of a
+	// disjunction still applies to it, and what its fields turn out to hold can
+	// rule some of them out, or which default applies.
+	Alternatives
 )
 
 func (u Use) String() string {
@@ -68,6 +74,8 @@ func (u Use) String() string {
 		return "control"
 	case Presence:
 		return "presence"
+	case Alternatives:
+		return "alternatives"
 	}
 	return fmt.Sprintf("Use(%d)", int(u))
 }
@@ -80,7 +88,7 @@ type Dependency struct {
 }
 
 // maxDepth bounds the expressions followed through lets and inline values.
-const maxDepth = 512
+const maxDepth = 4096
 
 // Analyze returns the dependencies of every field of v, which must be the root
 // of an instance. A target outside of v, such as a field of an imported package
@@ -112,30 +120,32 @@ func Analyze(v cue.Value) (result []Dependency, err error) {
 	if w.err != nil {
 		return nil, w.err
 	}
-	keys := make([]dependencyKey, 0, len(w.found))
-	for key := range w.found {
-		keys = append(keys, key)
+	result = make([]Dependency, 0, len(w.found))
+	for _, dependency := range w.found {
+		result = append(result, dependency)
 	}
-	sort.Slice(keys, func(i, j int) bool {
-		left, right := keys[i], keys[j]
-		if left.field != right.field {
-			return left.field < right.field
+	sort.Slice(result, func(i, j int) bool {
+		left, right := result[i], result[j]
+		if field := strings.Compare(left.Field.String(), right.Field.String()); field != 0 {
+			return field < 0
 		}
-		if left.target != right.target {
-			return left.target < right.target
+		if target := strings.Compare(left.Target.String(), right.Target.String()); target != 0 {
+			return target < 0
 		}
-		return left.use < right.use
+		return left.Use < right.Use
 	})
-	result = make([]Dependency, 0, len(keys))
-	for _, key := range keys {
-		result = append(result, w.found[key])
-	}
 	return result, nil
 }
 
+// A dependencyKey uses labels rather than formatted paths, which do not tell apart
+// hidden fields of the same name from different packages.
 type dependencyKey struct {
 	field, target string
 	use           Use
+}
+
+func labelKey(v *adt.Vertex) string {
+	return fmt.Sprint(v.Path())
 }
 
 type inlineKey struct {
@@ -202,6 +212,9 @@ func (w *walker) field(v *adt.Vertex) {
 	for conjunct := range v.LeafConjuncts() {
 		w.elem(s, conjunct.Env, conjunct.Elem())
 	}
+	if hasAlternatives(v) {
+		w.record(v, v, Alternatives)
+	}
 	for _, instance := range instances(v) {
 		for _, arc := range instance.Arcs {
 			if !arc.Label.IsLet() {
@@ -209,6 +222,14 @@ func (w *walker) field(v *adt.Vertex) {
 			}
 		}
 	}
+}
+
+// hasAlternatives reports whether more than one arm of a disjunction of structs or
+// lists still applies to v. A single remaining arm cannot depend on a value: another
+// value can only rule it out, which is an error.
+func hasAlternatives(v *adt.Vertex) bool {
+	disjunction, ok := v.DerefValue().BaseValue.(*adt.Disjunction)
+	return ok && len(disjunction.Values) > 1 && v.Kind()&(adt.StructKind|adt.ListKind) != 0
 }
 
 // instances returns the vertices holding the fields of v: every disjunct of a
@@ -256,6 +277,8 @@ func (w *walker) elem(s site, env *adt.Environment, e adt.Elem) {
 			return
 		}
 		w.expr(s, env, x)
+	case *adt.OpenExpr:
+		w.elem(s, env, x.X)
 	case *adt.CallExpr:
 		if isClose(x) && s.use == Value {
 			// close only affects which fields may be added.
@@ -470,9 +493,14 @@ func (w *walker) forSource(s site, env *adt.Environment, source adt.Expr) {
 	case adt.Resolver:
 		w.resolver(s.with(Presence), env, x)
 	case *adt.DisjunctionExpr:
-		// Which arm applies only depends on whether the others have errors.
+		// Which arm applies depends on which of them have errors. Those in a field make
+		// the whole value invalid regardless, but what is only in an arm is read.
 		for _, disjunct := range x.Values {
-			w.forSource(s, env, disjunct.Val)
+			if r, isReference := disjunct.Val.(adt.Resolver); isReference {
+				w.presence(s, env, r)
+			} else {
+				w.expr(s.control(), env, disjunct.Val)
+			}
 		}
 	case *adt.StructLit:
 		inner := &adt.Environment{Up: env, Vertex: w.empty}
@@ -637,7 +665,7 @@ func (w *walker) binary(s site, env *adt.Environment, x *adt.BinaryExpr) {
 	if x.Op == adt.EqualOp || x.Op == adt.NotEqualOp {
 		if operand, ok := comparedWithBottom(x); ok {
 			if r, isReference := operand.(adt.Resolver); isReference {
-				w.resolver(s.with(Presence), env, r)
+				w.presence(s, env, r)
 			} else {
 				w.expr(s.control(), env, operand)
 			}
@@ -646,6 +674,17 @@ func (w *walker) binary(s site, env *adt.Environment, x *adt.BinaryExpr) {
 	}
 	w.expr(s.operand(), env, x.X)
 	w.expr(s.operand(), env, x.Y)
+}
+
+// presence reports asking whether a reference has a value. An error in a field makes
+// the whole value invalid, so the answer cannot depend on it. An error in something
+// without a path of its own, like a let, fails nothing else and only changes the answer.
+func (w *walker) presence(s site, env *adt.Environment, r adt.Resolver) {
+	if target := w.resolve(env, r); target != nil && w.locate(target) == rootless {
+		w.resolver(s.control(), env, r)
+		return
+	}
+	w.resolver(s.with(Presence), env, r)
 }
 
 func comparedWithBottom(x *adt.BinaryExpr) (adt.Expr, bool) {
@@ -664,11 +703,7 @@ func (w *walker) call(s site, env *adt.Environment, x *adt.CallExpr) {
 	for _, argument := range x.Args {
 		switch {
 		case builtin != nil && builtin.Name == "len":
-			if r, isReference := argument.(adt.Resolver); isReference {
-				w.resolver(s.with(Presence), env, r)
-			} else {
-				w.expr(s.control(), env, argument)
-			}
+			w.forSource(s, env, argument)
 		case isClose(x):
 			w.expr(s, env, argument)
 		default:
@@ -733,11 +768,11 @@ func (w *walker) resolver(s site, env *adt.Environment, r adt.Resolver) {
 	case *adt.IndexExpr:
 		w.expr(s.control(), env, x.Index)
 		if target == nil {
-			w.expr(base(s), env, x.X)
+			w.expr(base(s, x.X), env, x.X)
 		}
 	case *adt.SelectorExpr:
 		if target == nil && !w.selectPending(s, env, x) {
-			w.expr(base(s), env, x.X)
+			w.expr(base(s, x.X), env, x.X)
 		}
 	case *adt.DynamicReference:
 		w.expr(s.control(), env, x.Label)
@@ -759,6 +794,11 @@ func (w *walker) selectPending(s site, env *adt.Environment, x *adt.SelectorExpr
 	if arc == nil {
 		return false
 	}
+	if arc.ArcType == adt.ArcOptional {
+		// Reading it finds nothing, whatever it would hold if it were present.
+		w.report(s.with(Presence), arc)
+		return true
+	}
 	w.report(s, arc)
 	return true
 }
@@ -770,11 +810,11 @@ func (w *walker) arc(v *adt.Vertex, label adt.Feature) *adt.Vertex {
 	return v.DerefValue().LookupRaw(label)
 }
 
-// base is the use of the struct selected into by a reference that did not resolve.
-// A selection that finds nothing yet only says something about its fields.
-func base(s site) site {
-	if s.use == Presence {
-		return s
+// base is the use of what a reference that did not resolve selects into. A selection
+// from a reference that finds nothing only says something about the fields it has.
+func base(s site, x adt.Expr) site {
+	if _, isReference := x.(adt.Resolver); isReference {
+		return s.with(Presence)
 	}
 	return s.operand()
 }
@@ -817,13 +857,83 @@ func (w *walker) report(s site, target *adt.Vertex) {
 		}
 		w.inlined(s, target)
 		w.projected(s, target)
+		w.enclosing(s, target)
 	case local:
-		if target == s.field {
+		if target != s.field {
+			w.record(s.field, target, s.use)
+		}
+	}
+}
+
+func (w *walker) record(field, target *adt.Vertex, use Use) {
+	key := dependencyKey{field: labelKey(field), target: labelKey(target), use: use}
+	w.found[key] = Dependency{Field: w.path(field), Target: w.path(target), Use: use}
+}
+
+// enclosing reports what decides that a vertex without a path of its own is there:
+// the declarations of what encloses it, which reading it does not otherwise touch.
+// In [if c {"a"}, "b"][0], c decides which element is selected.
+func (w *walker) enclosing(s site, v *adt.Vertex) {
+	for parent := v.Parent; parent != nil && w.locate(parent) == rootless; parent = parent.Parent {
+		key := inlineKey{vertex: parent, field: s.field, use: Alternatives}
+		if w.inline[key] {
 			return
 		}
-		field, targetPath := w.path(s.field), w.path(target)
-		key := dependencyKey{field: field.String(), target: targetPath.String(), use: s.use}
-		w.found[key] = Dependency{Field: field, Target: targetPath, Use: s.use}
+		w.inline[key] = true
+		control := site{field: s.field, self: parent, use: Control}
+		for conjunct := range parent.LeafConjuncts() {
+			w.controls(control, conjunct.Env, conjunct.Elem())
+		}
+	}
+}
+
+func (w *walker) controls(s site, env *adt.Environment, e adt.Elem) {
+	switch x := e.(type) {
+	case *adt.BinaryExpr:
+		if x.Op == adt.AndOp {
+			w.controls(s, env, x.X)
+			w.controls(s, env, x.Y)
+		}
+	case *adt.OpenExpr:
+		w.controls(s, env, x.X)
+	case adt.Resolver:
+		// A definition unified into it binds to it, as in [walker.unified].
+		target := w.resolve(env, x)
+		if target == nil {
+			return
+		}
+		target = target.DerefValue()
+		key := unifiedKey{target: target, self: s.self, field: nil}
+		if w.unifiedInto[key] {
+			return
+		}
+		w.unifiedInto[key] = true
+		for conjunct := range target.LeafConjuncts() {
+			w.controls(s, conjunct.Env, conjunct.Elem())
+		}
+	case *adt.Comprehension:
+		w.clauses(s, env, x, 0, nil)
+	case *adt.StructLit:
+		inner := &adt.Environment{Up: env, Vertex: s.self}
+		for _, decl := range x.Decls {
+			switch decl := decl.(type) {
+			case *adt.DynamicField:
+				w.expr(s, inner, decl.Key)
+			case *adt.BulkOptionalField:
+				w.expr(s, inner, decl.Filter)
+			case *adt.Comprehension:
+				w.clauses(s, inner, decl, 0, nil)
+			case adt.Expr:
+				w.controls(s, inner, decl)
+			}
+		}
+	case *adt.ListLit:
+		inner := &adt.Environment{Up: env, Vertex: s.self}
+		for _, element := range x.Elems {
+			if comprehension, ok := element.(*adt.Comprehension); ok {
+				w.clauses(s, inner, comprehension, 0, nil)
+			}
+		}
 	}
 }
 
@@ -852,6 +962,15 @@ func (w *walker) projectedConjunct(s site, env *adt.Environment, e adt.Elem, res
 	case *adt.DisjunctionExpr:
 		for _, disjunct := range x.Values {
 			w.projectedConjunct(s, env, disjunct.Val, rest)
+		}
+	case *adt.StructLit:
+		// Fields it declares itself are conjuncts of their own arcs. What it embeds is
+		// another source of the same labels.
+		inner := &adt.Environment{Up: env, Vertex: w.empty}
+		for _, decl := range x.Decls {
+			if embedded, ok := decl.(adt.Expr); ok {
+				w.projectedConjunct(s, inner, embedded, rest)
+			}
 		}
 	case adt.Resolver:
 		selected := w.resolve(env, x)

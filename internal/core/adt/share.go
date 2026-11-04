@@ -265,7 +265,7 @@ func (n *nodeContext) completeSharingTarget(v *Vertex, id CloseInfo) bool {
 // evaluating either vertex. It is a scheduling hint, not a containment proof.
 func (n *nodeContext) hasSameDefinitionConjunct(v *Vertex) bool {
 	for a := range n.node.LeafConjuncts() {
-		if a.Env == nil || a.CloseInfo.Opened {
+		if a.Env == nil || a.CloseInfo.Opened || isComprehension(a) {
 			continue
 		}
 		def := n.ctx.refTarget(a.Env, a.Expr())
@@ -273,7 +273,7 @@ func (n *nodeContext) hasSameDefinitionConjunct(v *Vertex) bool {
 			continue
 		}
 		for b := range v.LeafConjuncts() {
-			if b.Env == nil || b.CloseInfo.Opened {
+			if b.Env == nil || b.CloseInfo.Opened || isComprehension(b) {
 				continue
 			}
 			if n.ctx.refTarget(b.Env, b.Expr()) == def {
@@ -282,6 +282,14 @@ func (n *nodeContext) hasSameDefinitionConjunct(v *Vertex) bool {
 		}
 	}
 	return false
+}
+
+// isComprehension reports whether c is a field pushed down from a comprehension. Its
+// expression is only meaningful in the environments of the comprehension's results,
+// which have more levels than the environment of the conjunct.
+func isComprehension(c Conjunct) bool {
+	_, ok := c.Elem().(*Comprehension)
+	return ok
 }
 
 // hasSharedDisjunction reports whether a value still has alternatives.

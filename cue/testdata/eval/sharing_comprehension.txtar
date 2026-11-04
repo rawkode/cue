@@ -1,0 +1,44 @@
+# A definition with a field from a comprehension, reached by a second reference.
+# The sharing check must not read the field in the environment of the comprehension's
+# conjunct: it has fewer levels than the environment of a result.
+-- in.cue --
+x: 1
+#D: {if true {a: x}}
+s: #D
+t: #D & {b: 2}
+-- out/evalalpha --
+Errors:
+t.b: field not allowed:
+    ./in.cue:4:10
+
+Result:
+(_|_){
+  // [eval]
+  x: (int){ 1 }
+  #D: (#struct){
+    a: (int){ 1 }
+  }
+  s: ~(#D)
+  t: (_|_){
+    // [eval]
+    b: (_|_){
+      // [eval] t.b: field not allowed:
+      //     ./in.cue:4:10
+    }
+    a: (int){ 1 }
+  }
+}
+-- out/compile --
+--- in.cue
+{
+  x: 1
+  #D: {
+    if true {
+      a: 〈2;x〉
+    }
+  }
+  s: 〈0;#D〉
+  t: (〈0;#D〉 & {
+    b: 2
+  })
+}

@@ -344,6 +344,58 @@ func TestAnalyze(t *testing.T) {
 		source: `r: {a: {b: {o: bool}}}, x: {for _, v in r {for _, w in [v] {for _, y in [w] {c: {if (y.b.o & false) {d: 1}}}}}}`,
 		want:   []string{"x.c.d -> r.a.b.o control"},
 	}, {
+		name:   "arm selected by a field holding a value",
+		source: `o: string, x: (*{_k: "a", v: 1} | {_k: "b", v: 2}) & {_k: o}`,
+		want:   []string{"x -> x alternatives", "x._k -> o value"},
+	}, {
+		name:   "a single remaining arm has no alternatives",
+		source: `o: string, x: null | {a: o}, y: x & {b: 1}`,
+		absent: []string{"y -> y alternatives"},
+	}, {
+		name:   "selected list element with a condition beside it",
+		source: `o: string, x: [if (o & "a") != _|_ {"y"}, "z"][0]`,
+		want:   []string{"x -> o control"},
+	}, {
+		name:   "error in a let changes a comparison with bottom",
+		source: "o: string\nlet S = {z: o & \"a\"}\nx: {if S != _|_ {y: 1}}",
+		want:   []string{"x.y -> o control"},
+	}, {
+		name:   "error in an arm of a for source",
+		source: `o: string, x: {for k, _ in *{a: o & "a"} | {b: 2} {(k): 1}}`,
+		want:   []string{"x -> o control"},
+	}, {
+		name:       "explicitly opened reference",
+		attributes: "@experiment(explicitopen)\n",
+		source:     `o: string, _t: {if o == "a" {y: 1}}, x: _t...`,
+		want:       []string{"x.y -> o control"},
+	}, {
+		name:   "selecting a field that is not there",
+		source: `r: {o: string}, x: *r.missing | "none"`,
+		want:   []string{"x -> r presence"},
+		absent: []string{"x -> r control", "x -> r.o"},
+	}, {
+		name:   "selecting an optional field",
+		source: `o: string, r: {a?: o}, x: *r.a | "none"`,
+		want:   []string{"x -> r.a presence"},
+		absent: []string{"x -> o", "x -> r.a control"},
+	}, {
+		name:   "len of a literal",
+		source: `o: string, x: len({a: o}), y: len([o])`,
+		absent: []string{"x -> o", "y -> o"},
+	}, {
+		name:   "hidden fields of different packages stay apart",
+		source: importSchema + "o: string, x: schema.#S & {_x: o, y: \"\\(_x)\"}",
+		schema: `#S: {_x: "lit", z: _x}`,
+		want:   []string{"x._x -> o value", "x.y -> x._x computed"},
+	}, {
+		name:   "selection from an inline struct embedding a field",
+		source: `r: {o: string}, x: ({r}).o`,
+		want:   []string{"x -> r.o value"},
+	}, {
+		name:   "selection from an inline struct embedding a conditional",
+		source: `o: string, _t: {p: *1 | int, if (o & "a") != _|_ {("p"): 2}}, x: ({_t}).p`,
+		want:   []string{"x -> o control"},
+	}, {
 		name:   "scalar copy is read through",
 		source: `o: string, a: "\(o)", x: a`,
 		want:   []string{"x -> a value", "x -> o computed"},
