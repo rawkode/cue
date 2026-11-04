@@ -193,6 +193,14 @@ func TestAnalyze(t *testing.T) {
 		want:   []string{"x -> r presence", "x.a -> r.a.o value"},
 		absent: []string{"x -> r control"},
 	}, {
+		name:   "for over a default into a fixed field",
+		source: `r: {a: {o: string}}, x: {for _, v in *r | {} {y: v.o}}`,
+		want:   []string{"x.y -> r.a.o value"},
+	}, {
+		name:   "for over a default in a condition",
+		source: `r: {a: {o: string}}, x: {for k, v in *r | {} if (v.o & "z") == "z" {c: 1}}`,
+		want:   []string{"x.c -> r.a.o control"},
+	}, {
 		name:   "for over literal",
 		source: `o: string, x: {for k, v in {a: o} {(k): v}}`,
 		want:   []string{"x.a -> o value"},

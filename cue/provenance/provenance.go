@@ -301,6 +301,7 @@ func (w *walker) decl(s site, env *adt.Environment, d adt.Decl) {
 		// The value of a field is a conjunct of its arc.
 	case *adt.DynamicField:
 		w.expr(s.control(), env, x.Key)
+		w.dynamicField(s, env, x)
 	case *adt.BulkOptionalField:
 		w.expr(s.control(), env, x.Filter)
 	case *adt.Comprehension:
@@ -311,6 +312,25 @@ func (w *walker) decl(s site, env *adt.Environment, d adt.Decl) {
 		w.elem(s, env, x)
 	default:
 		w.fail(fmt.Errorf("provenance: unsupported declaration %T", d))
+	}
+}
+
+// dynamicField walks the value of a dynamic field in env. Its arc has this value as a
+// conjunct too, but bound by the evaluator, which may have bound loop variables to
+// copies: see [walker.forSources].
+func (w *walker) dynamicField(s site, env *adt.Environment, x *adt.DynamicField) {
+	if s.field != s.self {
+		return
+	}
+	key, _ := w.ctx.Evaluate(env, x.Key)
+	_ = w.ctx.Err()
+	if _, concrete := adt.Unwrap(key).(*adt.String); !concrete {
+		return
+	}
+	label := adt.LabelFromValue(w.ctx, x.Key, key)
+	_ = w.ctx.Err()
+	if arc := s.self.LookupRaw(label); arc != nil {
+		w.elem(site{field: arc, self: arc, use: s.use}, env, x.Value)
 	}
 }
 
@@ -365,6 +385,10 @@ func (w *walker) fixedField(s site, env *adt.Environment, y *adt.Comprehension, 
 		if !known {
 			inner := &adt.Environment{Up: y.ValueEnvironment(result), Vertex: w.empty}
 			w.literalDecl(child.control(), inner, field.Value)
+			return
+		}
+		if child.field != s.field {
+			w.elem(child, &adt.Environment{Up: y.ValueEnvironment(result), Vertex: s.self}, field.Value)
 		}
 	})
 }
@@ -401,17 +425,18 @@ func (w *walker) clausesKnown(s site, env *adt.Environment, y *adt.Comprehension
 	switch x := y.Clauses[i].(type) {
 	case *adt.ForClause:
 		w.forSource(s, env, x.Src)
-		source := w.evaluate(env, x.Src)
-		if source == nil {
+		sources, resolved := w.forSources(env, x.Src)
+		if !resolved {
 			next(&adt.Environment{Up: env, Vertex: w.empty}, false)
-			return
 		}
-		source.Unify(w.ctx, adt.FinalizeWithoutTypoCheck)
-		for _, instance := range instances(source) {
-			for _, arc := range instance.Arcs {
-				arc.Unify(w.ctx, adt.FinalizeWithoutTypoCheck)
-				if arc.Label.IsRegular() && (arc.ArcType == adt.ArcMember || arc.ArcType == adt.ArcPending) {
-					next(w.forBinding(env, x, arc), known)
+		for _, source := range sources {
+			source.Unify(w.ctx, adt.FinalizeWithoutTypoCheck)
+			for _, instance := range instances(source) {
+				for _, arc := range instance.Arcs {
+					arc.Unify(w.ctx, adt.FinalizeWithoutTypoCheck)
+					if arc.Label.IsRegular() && (arc.ArcType == adt.ArcMember || arc.ArcType == adt.ArcPending) {
+						next(w.forBinding(env, x, arc), known)
+					}
 				}
 			}
 		}
@@ -466,6 +491,27 @@ func (w *walker) forSource(s site, env *adt.Environment, source adt.Expr) {
 	default:
 		w.expr(s.control(), env, source)
 	}
+}
+
+// forSources returns what a for clause iterates over. The evaluator evaluates a default
+// to a copy with no trace of where it came from, so each arm is followed itself: the
+// loop variables then bind to the fields the arm reads.
+func (w *walker) forSources(env *adt.Environment, source adt.Expr) ([]*adt.Vertex, bool) {
+	if disjunction, ok := source.(*adt.DisjunctionExpr); ok {
+		var sources []*adt.Vertex
+		resolved := true
+		for _, disjunct := range disjunction.Values {
+			arm, armResolved := w.forSources(env, disjunct.Val)
+			sources = append(sources, arm...)
+			resolved = resolved && armResolved
+		}
+		return sources, resolved
+	}
+	vertex := w.evaluate(env, source)
+	if vertex == nil {
+		return nil, false
+	}
+	return []*adt.Vertex{vertex}, true
 }
 
 // forBinding builds the Environment ForClause.yield would for one element.
@@ -741,6 +787,9 @@ const (
 	foreign
 )
 
+// locate says where a vertex lives. Only the root of an instance has neither a parent
+// nor a label: anything else that ends without reaching one, like a disjunct of an
+// inline expression, is a copy that says nothing about where it came from.
 func (w *walker) locate(v *adt.Vertex) location {
 	for current := v; current != nil; current = current.Parent {
 		if !current.Rooted() || !current.MayAttach() {
@@ -748,6 +797,9 @@ func (w *walker) locate(v *adt.Vertex) location {
 		}
 		if current == w.root {
 			return local
+		}
+		if current.Parent == nil && (current.Label != 0 || current.IsDisjunct) {
+			return rootless
 		}
 	}
 	return foreign
