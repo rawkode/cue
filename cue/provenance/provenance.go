@@ -444,6 +444,11 @@ func (w *walker) forSource(s site, env *adt.Environment, source adt.Expr) {
 	switch x := source.(type) {
 	case adt.Resolver:
 		w.resolver(s.with(Presence), env, x)
+	case *adt.DisjunctionExpr:
+		// Which arm applies only depends on whether the others have errors.
+		for _, disjunct := range x.Values {
+			w.forSource(s, env, disjunct.Val)
+		}
 	case *adt.StructLit:
 		inner := &adt.Environment{Up: env, Vertex: w.empty}
 		for _, decl := range x.Decls {
@@ -791,6 +796,10 @@ func (w *walker) projectedConjunct(s site, env *adt.Environment, e adt.Elem, res
 		if x.Op == adt.AndOp {
 			w.projectedConjunct(s, env, x.X, rest)
 			w.projectedConjunct(s, env, x.Y, rest)
+		}
+	case *adt.DisjunctionExpr:
+		for _, disjunct := range x.Values {
+			w.projectedConjunct(s, env, disjunct.Val, rest)
 		}
 	case adt.Resolver:
 		selected := w.resolve(env, x)

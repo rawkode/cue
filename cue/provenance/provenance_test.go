@@ -188,6 +188,11 @@ func TestAnalyze(t *testing.T) {
 		source: `r: {a: {o: string}}, x: {for k, v in r if v.o == "a" {(k): 1}}`,
 		want:   []string{"x -> r presence", "x -> r.a.o control"},
 	}, {
+		name:   "for over a default",
+		source: `r: {a: {o: string}}, x: {for k, v in *r | {} {(k): v.o}}`,
+		want:   []string{"x -> r presence", "x.a -> r.a.o value"},
+		absent: []string{"x -> r control"},
+	}, {
 		name:   "for over literal",
 		source: `o: string, x: {for k, v in {a: o} {(k): v}}`,
 		want:   []string{"x.a -> o value"},
