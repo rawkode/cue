@@ -58,6 +58,15 @@ Conjuncts:    87
 Disjuncts:    68
 -- out/evalalpha --
 Errors:
+issue3977.inlineLet.p.x: conflicting values 1 and 2:
+    ./in.cue:38:14
+    ./in.cue:40:8
+    ./in.cue:43:6
+x: conflicting values 1 and 2:
+    ./in.cue:2:14
+    ./in.cue:4:8
+    ./in.cue:8:8
+    ./in.cue:8:18
 x: conflicting values 2 and 1:
     ./in.cue:20:14
     ./in.cue:22:8
@@ -68,6 +77,9 @@ x: conflicting values 4 and 1:
     ./in.cue:22:8
     ./in.cue:26:8
     ./in.cue:26:23
+x: invalid interpolation: 3 errors in empty disjunction::
+    ./in.cue:14:8
+    ./in.cue:14:17
 x: 2 errors in empty disjunction::
     ./in.cue:23:8
 
@@ -76,15 +88,23 @@ Result:
   // [eval]
   issue3977: (_|_){
     // [eval]
-    inlineExpr: (struct){
+    inlineExpr: (_|_){
+      // [eval]
       #NetworkID: (int){ 1 }
       #fn: (#struct){
         x: (int){ 1 }
         out: (int){ 2 }
       }
-      err: (int){ 3 }
+      err: (_|_){
+        // [eval] x: conflicting values 1 and 2:
+        //     ./in.cue:2:14
+        //     ./in.cue:4:8
+        //     ./in.cue:8:8
+        //     ./in.cue:8:18
+      }
     }
-    inlineDisj1: (struct){
+    inlineDisj1: (_|_){
+      // [eval]
       #NetworkID: (string){ |((string){ "2" }, (string){ "3" }, (string){ "4" }) }
       #fn: (#struct){
         x: (string){ |((string){ "2" }, (string){ "3" }, (string){ "4" }) }
@@ -93,7 +113,11 @@ Result:
           //     ./in.cue:14:8
         }
       }
-      err: (string){ "value=invalid" }
+      err: (_|_){
+        // [eval] x: invalid interpolation: 3 errors in empty disjunction::
+        //     ./in.cue:14:8
+        //     ./in.cue:14:17
+      }
     }
     inlineDisj2: (_|_){
       // [eval]
@@ -125,7 +149,8 @@ Result:
       }
       err: (int){ 11 }
     }
-    inlineLet: (struct){
+    inlineLet: (_|_){
+      // [eval]
       #NetworkID: (int){ 1 }
       let p#1 = (_|_){
         // [eval]
@@ -142,7 +167,12 @@ Result:
           //     ./in.cue:43:6
         }
       }
-      err: (int){ 12 }
+      err: (_|_){
+        // [eval] issue3977.inlineLet.p.x: conflicting values 1 and 2:
+        //     ./in.cue:38:14
+        //     ./in.cue:40:8
+        //     ./in.cue:43:6
+      }
     }
   }
 }

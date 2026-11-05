@@ -1,0 +1,80 @@
+# A let unifies a reference with a conflicting concrete value. When an
+# expression reads the let, the conflict used to be lost and only the concrete
+# conjunct was seen. The same held for a field of an inline value.
+! exec cue export compare.cue
+stderr 'conflicting values'
+! exec cue eval compare.cue
+stderr 'conflicting values'
+! exec cue vet -c compare.cue
+stderr 'conflicting values'
+! exec cue export reversed.cue
+stderr 'conflicting values'
+! exec cue export interpolation.cue
+stderr 'conflicting values'
+! exec cue export number.cue
+stderr 'conflicting values'
+! exec cue export condition.cue
+stderr 'conflicting values'
+! exec cue export clause.cue
+stderr 'conflicting values'
+! exec cue export inlinefield.cue
+stderr 'conflicting values'
+
+# These already fail as expected: the same conflict read directly, through a
+# hidden field, inline, between two literals, and through a field of a let.
+! exec cue export direct.cue
+stderr 'conflicting values'
+! exec cue export field.cue
+stderr 'conflicting values'
+! exec cue export inline.cue
+stderr 'conflicting values'
+! exec cue export literal.cue
+stderr 'conflicting values'
+! exec cue export letfield.cue
+stderr 'conflicting values'
+
+-- inlinefield.cue --
+#N: 1
+#F: {x: #N, out: x + 10}
+y: (#F & {x: 2}).out
+-- compare.cue --
+o: "zzz"
+let M = o & "x"
+y: M == "x"
+-- reversed.cue --
+o: "zzz"
+let M = "x" & o
+y: M == "x"
+-- interpolation.cue --
+o: "zzz"
+let M = o & "x"
+y: "\(M)"
+-- number.cue --
+o: 1
+let M = o & 2
+y: M == 2
+-- condition.cue --
+o: "zzz"
+let M = o & "x"
+y: {if M == "x" {a: 1}}
+-- clause.cue --
+o: "zzz"
+for k, v in {a: o} let i = v & "x" if i == "x" {(k): 1}
+-- direct.cue --
+o: "zzz"
+let M = o & "x"
+y: M
+-- field.cue --
+o: "zzz"
+_m: o & "x"
+y: _m == "x"
+-- inline.cue --
+o: "zzz"
+y: (o & "x") == "x"
+-- literal.cue --
+let M = "zzz" & "x"
+y: M == "x"
+-- letfield.cue --
+o: "zzz"
+let M = {v: o & "x"}
+y: M.v == "x"

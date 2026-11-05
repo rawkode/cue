@@ -752,13 +752,13 @@ func (c *OpContext) evalStateCI(v Expr, state Flags) (result Value, ci CloseInfo
 		if arc == nil {
 			return nil, c.ci
 		}
-		// TODO(3977): register internal nodes for later verifications. The
-		// following limits the possibility of some common and useful cycles.
-		//
-		// if arc.Internal() {
-		//  mode := state.conditions()
-		//  state = final(partial, mode|allTasksCompleted)
-		// }
+		// A let or a field of an inline value has no path from the root, so nothing
+		// finalizes it, and reading it is the only chance for its conflicts to surface.
+		// Its first scalar conjunct must not stand for all of them. See issues 3977
+		// and 4548.
+		if arc.Label.IsLet() || arc.Internal() {
+			state.condition |= allTasksCompleted
+		}
 		orig := arc
 		// TODO(deref): what is the right level of dereferencing here?
 		// DerefValue seems to work too.
