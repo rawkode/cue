@@ -19,11 +19,6 @@
 // comprehension or a let reports the field of this value that it reads, not
 // where it was declared. That includes references evaluation consumed, such as
 // the condition of an if clause, which leave no trace in the resulting value.
-//
-// The value must be built with structure sharing disabled, as sharing replaces
-// an instantiated field with the one it was shared from:
-//
-//	cuecontext.New(cuecontext.CUE_DEBUG("sharing=false"))
 package provenance
 
 import (
@@ -33,9 +28,11 @@ import (
 	"strings"
 
 	"cuelang.org/go/cue"
+	"cuelang.org/go/cue/build"
+	"cuelang.org/go/cue/cuecontext"
 	"cuelang.org/go/internal/core/adt"
 	"cuelang.org/go/internal/core/eval"
-	"cuelang.org/go/internal/value"
+	"cuelang.org/go/internal/core/runtime"
 )
 
 // A Use says how a field uses the target of a reference.
@@ -90,20 +87,28 @@ type Dependency struct {
 // maxDepth bounds the expressions followed through lets and inline values.
 const maxDepth = 4096
 
-// Analyze returns the dependencies of every field of v, which must be the root
-// of an instance. A target outside of v, such as a field of an imported package
-// that was not unified into v, is not reported: it cannot depend on v.
+// Analyze returns the dependencies of the fields at roots and everything below them,
+// and of whatever those read, however indirectly. The rest of the instance is not
+// evaluated, so its size and shape cost nothing. A root that does not exist has no
+// dependencies, and the empty path is the whole instance. A target outside of the
+// instance, such as a field of an imported package that was not unified into it, is
+// not reported: it cannot depend on the instance.
+//
+// The instance is evaluated on its own, with structure sharing disabled, as sharing
+// replaces a field instantiated from a definition with the definition's own field.
 //
 // An error means the analysis is incomplete and nothing may be concluded from it.
-func Analyze(v cue.Value) (result []Dependency, err error) {
+func Analyze(instance *build.Instance, roots ...cue.Path) (result []Dependency, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			result, err = nil, fmt.Errorf("provenance: analysis failed: %v", recovered)
 		}
 	}()
-	r, root := value.ToInternal(v)
-	if root == nil {
-		return nil, errors.New("provenance: value has no vertex")
+	r := (*runtime.Runtime)(cuecontext.New(cuecontext.CUE_DEBUG("sharing=false")))
+	// Build, unlike [cue.Context.BuildInstance], does not evaluate anything yet.
+	root, buildErr := r.Build(nil, instance)
+	if buildErr != nil {
+		return nil, fmt.Errorf("provenance: %w", buildErr)
 	}
 	w := &walker{
 		ctx:    eval.NewContext(r, root),
@@ -111,12 +116,20 @@ func Analyze(v cue.Value) (result []Dependency, err error) {
 		empty:  &adt.Vertex{},
 		found:  map[dependencyKey]Dependency{},
 		fields: map[*adt.Vertex]bool{},
+		own:    map[*adt.Vertex]bool{},
 		inline: map[inlineKey]bool{},
 
 		unifiedInto: map[unifiedKey]bool{},
 	}
 	w.empty.ForceDone()
-	w.field(root)
+	w.pending = append(w.pending, roots...)
+	for len(w.pending) > 0 {
+		path := w.pending[len(w.pending)-1]
+		w.pending = w.pending[:len(w.pending)-1]
+		if v := w.lookup(path); v != nil {
+			w.field(v)
+		}
+	}
 	if w.err != nil {
 		return nil, w.err
 	}
@@ -163,6 +176,8 @@ type walker struct {
 	empty       *adt.Vertex
 	found       map[dependencyKey]Dependency
 	fields      map[*adt.Vertex]bool
+	own         map[*adt.Vertex]bool
+	pending     []cue.Path
 	inline      map[inlineKey]bool
 	unifiedInto map[unifiedKey]bool
 	depth       int
@@ -201,13 +216,39 @@ func (w *walker) fail(err error) {
 	}
 }
 
-// field reports the dependencies of v and of everything below it.
-func (w *walker) field(v *adt.Vertex) {
-	if w.fields[v] {
+// lookup returns the vertex at path, evaluating no more than it takes to find it,
+// and reports what decides that it is there, which its ancestors say.
+func (w *walker) lookup(path cue.Path) *adt.Vertex {
+	v := w.root
+	for _, selector := range path.Selectors() {
+		v.CompleteArcsOnly(w.ctx)
+		_ = w.ctx.Err()
+		w.conjuncts(v)
+		if hasAlternatives(v) {
+			// Which arm applies depends on what any of its fields holds.
+			w.field(v)
+		}
+		var found *adt.Vertex
+		for _, arc := range v.DerefValue().Arcs {
+			if !arc.Label.IsLet() && w.selector(arc.Label) == selector {
+				found = arc
+				break
+			}
+		}
+		if found == nil {
+			return nil
+		}
+		v = found
+	}
+	return v
+}
+
+// conjuncts reports what the expressions of v depend on.
+func (w *walker) conjuncts(v *adt.Vertex) {
+	if w.own[v] {
 		return
 	}
-	w.fields[v] = true
-	v.Unify(w.ctx, adt.FinalizeWithoutTypoCheck)
+	w.own[v] = true
 	s := site{field: v, self: v, use: Value}
 	for conjunct := range v.LeafConjuncts() {
 		w.elem(s, conjunct.Env, conjunct.Elem())
@@ -215,6 +256,16 @@ func (w *walker) field(v *adt.Vertex) {
 	if hasAlternatives(v) {
 		w.record(v, v, Alternatives)
 	}
+}
+
+// field reports the dependencies of v and of everything below it.
+func (w *walker) field(v *adt.Vertex) {
+	if w.fields[v] {
+		return
+	}
+	w.fields[v] = true
+	v.Unify(w.ctx, adt.FinalizeWithoutTypoCheck)
+	w.conjuncts(v)
 	for _, instance := range instances(v) {
 		for _, arc := range instance.Arcs {
 			if !arc.Label.IsLet() {
@@ -600,6 +651,15 @@ func (w *walker) evaluate(env *adt.Environment, expression adt.Expr) *adt.Vertex
 }
 
 func (w *walker) resolve(env *adt.Environment, r adt.Resolver) *adt.Vertex {
+	// An expression of an arm of a disjunction is bound to the copy of the field that
+	// the evaluator was working on, which still says it is being evaluated. Reading
+	// through it would evaluate all of that again, once for every reference, and that
+	// is exponential in how deeply such arms nest. Evaluation is over by now.
+	for current := env; current != nil; current = current.Up {
+		if current.Vertex != nil && current.Vertex.IsDisjunct {
+			current.Vertex.ForceDone()
+		}
+	}
 	vertex, _ := w.ctx.Resolve(adt.MakeConjunct(env, r, adt.CloseInfo{}), r)
 	_ = w.ctx.Err()
 	return vertex
@@ -644,7 +704,7 @@ func (w *walker) expr(s site, env *adt.Environment, e adt.Elem) {
 		w.expr(s.control(), env, x.Hi)
 		w.expr(s.control(), env, x.Stride)
 	case *adt.ListLit, *adt.StructLit:
-		w.literal(s, env, x.(adt.Expr))
+		w.literalDecl(s.operand(), env, x)
 	case *adt.Comprehension:
 		w.literalDecl(s, env, x)
 	case *adt.LabelReference:
@@ -712,18 +772,8 @@ func (w *walker) call(s site, env *adt.Environment, x *adt.CallExpr) {
 	}
 }
 
-// literal walks a composite literal which is an operand: evaluating it gives the
-// fields of the literal its own vertex, which its references bind to.
-func (w *walker) literal(s site, env *adt.Environment, x adt.Expr) {
-	if vertex := w.evaluate(env, x); vertex != nil {
-		w.inlined(s.operand(), vertex)
-		return
-	}
-	w.literalDecl(s.operand(), env, x)
-}
-
-// literalDecl is the fallback for what cannot be evaluated: every reference counts,
-// and those that bind to something only known once evaluated do not resolve.
+// literalDecl walks a composite literal which is an operand: every reference counts.
+// Those that bind to its own fields do not resolve, but what those hold is walked too.
 func (w *walker) literalDecl(s site, env *adt.Environment, n adt.Node) {
 	inner := &adt.Environment{Up: env, Vertex: w.empty}
 	switch x := n.(type) {
@@ -756,6 +806,8 @@ func (w *walker) literalDecl(s site, env *adt.Environment, n adt.Node) {
 		}
 	case adt.Expr:
 		w.expr(s, env, x)
+	default:
+		w.fail(fmt.Errorf("provenance: unsupported literal element %T", n))
 	}
 }
 
@@ -769,14 +821,41 @@ func (w *walker) resolver(s site, env *adt.Environment, r adt.Resolver) {
 		w.expr(s.control(), env, x.Index)
 		if target == nil {
 			w.expr(base(s, x.X), env, x.X)
+		} else if selectsAnArm(x.X) {
+			w.expr(s.control(), env, x.X)
 		}
 	case *adt.SelectorExpr:
 		if target == nil && !w.selectPending(s, env, x) {
 			w.expr(base(s, x.X), env, x.X)
+		} else if selectsAnArm(x.X) {
+			w.expr(s.control(), env, x.X)
 		}
 	case *adt.DynamicReference:
 		w.expr(s.control(), env, x.Label)
 	}
+}
+
+// selectsAnArm reports whether a selection reads from a disjunction written in place.
+// What it resolved to says nothing about the arms that did not apply yet, which may
+// be the ones that apply once what decides them is known.
+func selectsAnArm(x adt.Expr) bool {
+	switch x := x.(type) {
+	case *adt.DisjunctionExpr:
+		return true
+	case *adt.BinaryExpr:
+		return x.Op == adt.AndOp && (selectsAnArm(x.X) || selectsAnArm(x.Y))
+	case *adt.OpenExpr:
+		return selectsAnArm(x.X)
+	case *adt.CallExpr:
+		if isClose(x) {
+			for _, argument := range x.Args {
+				if selectsAnArm(argument) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // selectPending reports a selection from a struct that cannot be read yet, as what
@@ -861,6 +940,7 @@ func (w *walker) report(s site, target *adt.Vertex) {
 	case local:
 		if target != s.field {
 			w.record(s.field, target, s.use)
+			w.pending = append(w.pending, w.path(target))
 		}
 	}
 }
@@ -884,6 +964,15 @@ func (w *walker) enclosing(s site, v *adt.Vertex) {
 		for conjunct := range parent.LeafConjuncts() {
 			w.controls(control, conjunct.Env, conjunct.Elem())
 		}
+		// An arm is a copy of the field holding the disjunction, which has the arms that
+		// did not apply yet, and they may apply once what decides them is known.
+		if parent.IsDisjunct && parent.Parent != nil {
+			if holder := parent.Parent.LookupRaw(parent.Label); holder != nil {
+				for conjunct := range holder.LeafConjuncts() {
+					w.controls(control, conjunct.Env, conjunct.Elem())
+				}
+			}
+		}
 	}
 }
 
@@ -893,9 +982,15 @@ func (w *walker) controls(s site, env *adt.Environment, e adt.Elem) {
 		if x.Op == adt.AndOp {
 			w.controls(s, env, x.X)
 			w.controls(s, env, x.Y)
+			return
 		}
+		w.expr(s, env, x)
 	case *adt.OpenExpr:
 		w.controls(s, env, x.X)
+	case *adt.DisjunctionExpr:
+		for _, disjunct := range x.Values {
+			w.controls(s, env, disjunct.Val)
+		}
 	case adt.Resolver:
 		// A definition unified into it binds to it, as in [walker.unified].
 		target := w.resolve(env, x)
@@ -934,6 +1029,8 @@ func (w *walker) controls(s site, env *adt.Environment, e adt.Elem) {
 				w.clauses(s, inner, comprehension, 0, nil)
 			}
 		}
+	default:
+		w.expr(s, env, e)
 	}
 }
 
@@ -958,7 +1055,11 @@ func (w *walker) projectedConjunct(s site, env *adt.Environment, e adt.Elem, res
 		if x.Op == adt.AndOp {
 			w.projectedConjunct(s, env, x.X, rest)
 			w.projectedConjunct(s, env, x.Y, rest)
+			return
 		}
+		w.expr(s.control(), env, x)
+	case *adt.OpenExpr:
+		w.projectedConjunct(s, env, x.X, rest)
 	case *adt.DisjunctionExpr:
 		for _, disjunct := range x.Values {
 			w.projectedConjunct(s, env, disjunct.Val, rest)
@@ -983,6 +1084,11 @@ func (w *walker) projectedConjunct(s site, env *adt.Environment, e adt.Elem, res
 		if selected != nil {
 			w.report(s, selected)
 		}
+	case *adt.ListLit:
+		// Its elements are conjuncts of their own arcs, and nothing can be embedded in it.
+	default:
+		// Something other than a struct holds these labels: it may decide them.
+		w.expr(s.control(), env, e)
 	}
 }
 
@@ -1035,18 +1141,22 @@ func (w *walker) path(v *adt.Vertex) cue.Path {
 	features := v.Path()
 	selectors := make([]cue.Selector, 0, len(features))
 	for _, feature := range features {
-		switch feature.Typ() {
-		case adt.IntLabel:
-			selectors = append(selectors, cue.Index(feature.Index()))
-		case adt.DefinitionLabel:
-			selectors = append(selectors, cue.Def(feature.SelectorString(w.ctx)))
-		case adt.HiddenDefinitionLabel, adt.HiddenLabel:
-			selectors = append(selectors, cue.Hid(feature.IdentString(w.ctx), feature.PkgID(w.ctx)))
-		case adt.StringLabel:
-			selectors = append(selectors, cue.Str(feature.StringValue(w.ctx)))
-		default:
-			w.fail(fmt.Errorf("provenance: unsupported label %s", feature.SelectorString(w.ctx)))
-		}
+		selectors = append(selectors, w.selector(feature))
 	}
 	return cue.MakePath(selectors...)
+}
+
+func (w *walker) selector(feature adt.Feature) cue.Selector {
+	switch feature.Typ() {
+	case adt.IntLabel:
+		return cue.Index(feature.Index())
+	case adt.DefinitionLabel:
+		return cue.Def(feature.SelectorString(w.ctx))
+	case adt.HiddenDefinitionLabel, adt.HiddenLabel:
+		return cue.Hid(feature.IdentString(w.ctx), feature.PkgID(w.ctx))
+	case adt.StringLabel:
+		return cue.Str(feature.StringValue(w.ctx))
+	}
+	w.fail(fmt.Errorf("provenance: unsupported label %s", feature.SelectorString(w.ctx)))
+	return cue.Selector{}
 }

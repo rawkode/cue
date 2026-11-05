@@ -21,7 +21,8 @@ import (
 	"strings"
 	"testing"
 
-	"cuelang.org/go/cue/cuecontext"
+	"cuelang.org/go/cue"
+	"cuelang.org/go/cue/build"
 	"cuelang.org/go/cue/load"
 	"cuelang.org/go/cue/provenance"
 )
@@ -40,11 +41,7 @@ func analyze(t *testing.T, attributes, source, schema string) []string {
 	if err := instances[0].Err; err != nil {
 		t.Fatal(err)
 	}
-	value := cuecontext.New(cuecontext.CUE_DEBUG("sharing=false")).BuildInstance(instances[0])
-	if err := value.Err(); err != nil {
-		t.Fatal(err)
-	}
-	dependencies, err := provenance.Analyze(value)
+	dependencies, err := provenance.Analyze(instances[0], cue.Path{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,6 +50,92 @@ func analyze(t *testing.T, attributes, source, schema string) []string {
 		result = append(result, fmt.Sprintf("%v -> %v %v", dependency.Field, dependency.Target, dependency.Use))
 	}
 	return result
+}
+
+func loadInstance(t *testing.T, source string) *build.Instance {
+	t.Helper()
+	dir := t.TempDir()
+	overlay := map[string]load.Source{
+		filepath.Join(dir, "cue.mod/module.cue"): load.FromString(`module: "example.com/m@v0", language: version: "v0.16.0"`),
+		filepath.Join(dir, "a.cue"):              load.FromString("package a\n" + source),
+	}
+	instances := load.Instances([]string{"."}, &load.Config{Dir: dir, ModuleRoot: dir, Overlay: overlay})
+	if err := instances[0].Err; err != nil {
+		t.Fatal(err)
+	}
+	return instances[0]
+}
+
+func format(dependencies []provenance.Dependency) []string {
+	var result []string
+	for _, dependency := range dependencies {
+		result = append(result, fmt.Sprintf("%v -> %v %v", dependency.Field, dependency.Target, dependency.Use))
+	}
+	return result
+}
+
+// Only what the roots read is analysed, so what it depends on is complete and nothing
+// else is even evaluated: instantiating these definitions takes 2^40 fields.
+func TestAnalyzeRootsReachOnlyWhatTheyRead(t *testing.T) {
+	source := `
+#T0: {x: string}
+` + func() string {
+		var definitions strings.Builder
+		for level := 1; level <= 40; level++ {
+			fmt.Fprintf(&definitions, "#T%d: {a: #T%d, b: #T%d}\n", level, level-1, level-1)
+		}
+		return definitions.String()
+	}() + `
+huge: #T40
+unrelated: {if huge.a.a.a.b.x == "x" {y: 1}}
+source: string
+middle: {if false {z: 1}, value: source}
+config: name: middle.value
+`
+	dependencies, err := provenance.Analyze(loadInstance(t, source), cue.ParsePath("config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"config.name -> middle.value value",
+		"config.name -> source value",
+		"middle.value -> source value",
+	}
+	if got := format(dependencies); !slices.Equal(got, want) {
+		t.Errorf("got:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestAnalyzeAMissingRootHasNoDependencies(t *testing.T) {
+	dependencies, err := provenance.Analyze(loadInstance(t, "a: b"+"\nb: string\n"), cue.ParsePath("missing.field"))
+	if err != nil || len(dependencies) != 0 {
+		t.Errorf("got %v, %v", dependencies, err)
+	}
+}
+
+// What an ancestor decides reaches the fields below it, without reading its other fields.
+func TestAnalyzeRootsSeeWhatDecidesAnAncestor(t *testing.T) {
+	source := `
+source: string
+other: string
+holder: {
+	if source == "x" {inner: {z: 1}}
+	inner: value: "literal"
+	sibling: other
+}
+`
+	dependencies, err := provenance.Analyze(loadInstance(t, source), cue.ParsePath("holder.inner.value"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range format(dependencies) {
+		if strings.Contains(line, "other") {
+			t.Errorf("a sibling was read: %s", line)
+		}
+	}
+	if got := format(dependencies); !slices.Contains(got, "holder.inner -> source control") {
+		t.Errorf("what decides the ancestor is missing: %s", strings.Join(got, "\n"))
+	}
 }
 
 func TestAnalyze(t *testing.T) {
@@ -70,6 +153,18 @@ func TestAnalyze(t *testing.T) {
 		name:   "constrained",
 		source: `o: string, x: o & =~"^a" & "abc"`,
 		want:   []string{"x -> o value"},
+	}, {
+		name:   "selected from a default that does not apply yet",
+		source: `o: string, x: (*{if o == "x" {q: "a"}} | {q: "z"}).q`,
+		want:   []string{"x -> o control"},
+	}, {
+		name:   "selected from a default held by a let",
+		source: "o: string\nlet D = *{if o == \"x\" {q: \"a\"}} | {q: \"z\"}\nx: D.q",
+		want:   []string{"x -> o control"},
+	}, {
+		name:   "selected from a default of a list",
+		source: `o: string, x: (*[if o == "x" {"a"}, "b"] | ["c"])[0]`,
+		want:   []string{"x -> o control"},
 	}, {
 		name:   "chain",
 		source: `o: string, a: o, x: a`,
