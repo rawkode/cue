@@ -16,6 +16,7 @@ package build
 
 import (
 	"fmt"
+	iofs "io/fs"
 	pathpkg "path"
 	"path/filepath"
 	"slices"
@@ -56,6 +57,11 @@ type Instance struct {
 	// PkgName is the name specified in the package clause.
 	PkgName string
 	hasName bool
+
+	// EmbedFS, if set, returns where the @embed attributes of files in the given
+	// directory read from, instead of that directory on disk. It lets a caller
+	// evaluate an instance from a fixed set of bytes, as it can with its CUE files.
+	EmbedFS func(dir string) iofs.StatFS
 
 	// ImportPath returns the unique path to identify an imported instance.
 	//

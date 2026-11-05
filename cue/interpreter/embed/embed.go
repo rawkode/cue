@@ -243,7 +243,11 @@ func (c *compiler) Compile(funcName string, scope adt.Value, a *internal.Attr) (
 	// TODO: obtain an iofs.FS from load or something similar.
 	dir := filepath.Dir(pos.File().Name())
 	if c.dir != dir {
-		c.fs = os.DirFS(dir).(iofs.StatFS) // Documented as implementing iofs.StatFS
+		if c.b.EmbedFS != nil {
+			c.fs = c.b.EmbedFS(dir)
+		} else {
+			c.fs = os.DirFS(dir).(iofs.StatFS) // Documented as implementing iofs.StatFS
+		}
 		c.dir = dir
 	}
 
