@@ -34,8 +34,21 @@ import "slices"
 // disjunction then resolves to a, which can be shared. Whether two definitions
 // can be unified does not depend on where a reference occurs, so it is
 // computed once for each pair of definitions.
+//
+// The same holds for a field of an imported package, as in
+//
+//	deps: [pkg.a]
+//
+// The value of pkg.a is that of its package alone, so the conditions are those
+// of a field of the same package; see importedField. One of them is checked
+// differently. A package that embeds a definition may declare fields that the
+// definition does not have, so that #A constrains a without being enforced
+// on all of a. A typed reference within that package shares a nonetheless,
+// which accepts such a field where a & #A would reject it. For a field of
+// another package the unification is evaluated once instead; see closedBy.
 
-// defPair identifies the unification of two definitions.
+// defPair identifies the unification of two definitions, or that of a value
+// with a definition.
 type defPair struct {
 	a, b *Vertex
 }
@@ -57,7 +70,8 @@ func (n *nodeContext) shareTypedReference() bool {
 		return false
 	}
 
-	// Find the single reference to a non-definition value.
+	// Find the single reference to a non-definition value. A field of an
+	// imported package is looked up below, as that evaluates the package.
 	refIndex := -1
 	var target *Vertex
 	for i, c := range v.Conjuncts {
@@ -65,7 +79,7 @@ func (n *nodeContext) shareTypedReference() bool {
 			continue
 		}
 		w := n.ctx.refTarget(c.Env, c.Expr())
-		if w == nil || w.Label.IsDef() {
+		if (w == nil || w.Label.IsDef()) && !isImportedField(c.Expr()) {
 			continue
 		}
 		if refIndex >= 0 {
@@ -97,10 +111,17 @@ func (n *nodeContext) shareTypedReference() bool {
 		types = append(types, defs)
 	}
 
+	// The other conjuncts are types: look up a field of an imported package.
+	imported := target == nil
+	if imported {
+		if target = n.importedField(ref.Expr()); target == nil {
+			return false
+		}
+	}
 	if !n.completeTypedTarget(target) || !n.isTypedShareTarget(target) {
 		return false
 	}
-	included := n.closedDefinitions(target)
+	included := n.closedDefinitions(target, imported)
 	if len(included) == 0 {
 		return false
 	}
@@ -110,6 +131,10 @@ func (n *nodeContext) shareTypedReference() bool {
 		matched := false
 		for _, def := range defs {
 			if slices.Contains(included, def) {
+				// includesDefinition holds if no embedding relaxes def.
+				if imported && !n.includesDefinition(target, def) && !n.ctx.closedBy(target, def) {
+					return false
+				}
 				matched = true
 				continue
 			}
@@ -153,6 +178,166 @@ func isTypedReferenceCandidate(c Conjunct) bool {
 		return c.Env != nil
 	}
 	return false
+}
+
+// isImportedField reports whether x selects a field of an imported package
+// by a path of regular fields, as in pkg.a.b.
+func isImportedField(x Expr) bool {
+	for {
+		sel, ok := x.(*SelectorExpr)
+		if !ok || !sel.Sel.IsRegular() {
+			return false
+		}
+		if r, ok := sel.X.(*ImportReference); ok {
+			// A builtin package has no instance.
+			return r.Instance != nil
+		}
+		x = sel.X
+	}
+}
+
+// maxImportedPath bounds the fields selected from an imported package.
+const maxImportedPath = 8
+
+// importedField returns the arc that x, for which isImportedField holds,
+// names, or nil if it is not known to be a regular field.
+//
+// The root of an imported package is a vertex of its own: the runtime holds
+// one for each instance, its conjuncts are the files of the package, and it
+// has no parent. A package cannot refer to a package that imports it, so the
+// value of the field does not depend on the node that refers to it or on
+// anything that is being evaluated. An arc reached from that root by regular
+// fields is rooted in the same sense as an arc of the instance of n.
+//
+// refTarget does not evaluate, and the arcs of a package that has not been
+// referred to do not exist yet. Process the conjuncts of the root and of each
+// struct along the path, as a lookup of the reference does, without forcing
+// anything that is blocked.
+func (n *nodeContext) importedField(x Expr) *Vertex {
+	c := n.ctx
+
+	var buf [maxImportedPath]Feature
+	path := buf[:0]
+	var w *Vertex
+	for w == nil {
+		sel := x.(*SelectorExpr)
+		if len(path) == cap(path) {
+			return nil
+		}
+		path = append(path, sel.Sel)
+		if r, ok := sel.X.(*ImportReference); ok {
+			if w = c.Runtime.LoadInstance(r.Instance); w == nil {
+				return nil
+			}
+		}
+		x = sel.X
+	}
+
+	// earlier records that an earlier operation began to evaluate a struct
+	// along the path. Such a struct is left as it is.
+	earlier := false
+	for i := len(path) - 1; i >= 0; i-- {
+		w = w.DerefValue()
+		if !w.isFinal() {
+			s := w.getState(c)
+			if s == nil {
+				return nil
+			}
+
+			// Errors are those of the package. A lookup reports them for
+			// the reference, so leave a struct that has any to the usual
+			// path.
+			saved := c.errs
+			c.errs = nil
+			if s.ctx != c {
+				earlier = true
+			} else {
+				s.completeNodeTasks(attemptOnly)
+				if len(s.disjuncts) > 0 {
+					// The fields of a disjunction are those of its result.
+					w.unify(c, Flags{condition: arcTypeKnown, mode: attemptOnly, checkTypos: false})
+				}
+			}
+			failed := w.state != s || s.hasErr()
+			c.errs = saved
+			if failed {
+				return nil
+			}
+			w = w.DerefValue()
+		}
+		if b := w.Bottom(); (b != nil && b != cycle) || w.ChildErrors != nil {
+			return nil
+		}
+		if _, ok := w.BaseValue.(*Disjunction); ok {
+			// A lookup selects the default, or fails.
+			return nil
+		}
+
+		w = w.LookupRaw(path[i])
+		if w == nil || w.ArcType != ArcMember {
+			return nil
+		}
+	}
+	if earlier && !w.isFinal() {
+		// Only this operation completes a field on demand.
+		return nil
+	}
+	return w
+}
+
+// closedBy reports whether the final value v, which def constrains, is
+// closed by def: whether unifying v with def again gives v.
+//
+// A definition that constrains v need not be enforced on all of its fields.
+// A struct that embeds a definition may declare fields that the definition,
+// or a definition it refers to, does not have:
+//
+//	#P: {tasks?: [string]: #T}
+//	#T: {cmd?: string}
+//	{#P, tasks: a: {cmd: "x", extra: 1}}
+//
+// Here extra is allowed in tasks.a, but not in tasks.a & #T. Whether v has
+// such a field is established once for each definition, by evaluating the
+// unification on a detached vertex, as disjoint does for two definitions. As
+// def already constrains v, the unification adds nothing to v unless it
+// fails.
+func (c *OpContext) closedBy(v, def *Vertex) bool {
+	key := defPair{v, def}
+	switch c.closedTargets[key] {
+	case disjointYes:
+		return true
+	case disjointPending, disjointNo:
+		return false
+	}
+	if c.closedTargets == nil {
+		c.closedTargets = map[defPair]disjointResult{}
+	}
+	c.closedTargets[key] = disjointPending
+
+	// As in disjoint, evaluate outside any disjunct.
+	overlays := c.overlays
+	c.overlays = nil
+	saved := c.errs
+	c.errs = nil
+
+	w := &Vertex{Parent: v.Parent, Label: v.Label}
+	w.Conjuncts = []Conjunct{
+		MakeConjunct(nil, v, CloseInfo{}),
+		MakeConjunct(nil, def, CloseInfo{FromDef: true}),
+	}
+	w.Finalize(c)
+
+	failed := c.errs != nil
+	c.errs = saved
+	c.overlays = overlays
+
+	result := disjointNo
+	if x := w.DerefValue(); !failed && w.isFinal() && x.Bottom() == nil &&
+		x.ChildErrors == nil && w.ChildErrors == nil {
+		result = disjointYes
+	}
+	c.closedTargets[key] = result
+	return result == disjointYes
 }
 
 // completeTypedTarget finalizes the target of a forward reference if it is
@@ -212,10 +397,18 @@ func (n *nodeContext) isTypedShareTarget(v *Vertex) bool {
 // with their closedness enforced at v. These are direct references whose typo
 // checking is enabled and that are not embedded within v itself; an embedding
 // in an enclosing value does not relax the closedness of v.
-func (n *nodeContext) closedDefinitions(v *Vertex) []*Vertex {
+//
+// The state of a value that an earlier operation evaluated is evidence only
+// if earlier is set. That is for a final field of an imported package: no
+// operation can add a conjunct to it, and closedBy unifies it with the
+// definition in this operation.
+func (n *nodeContext) closedDefinitions(v *Vertex, earlier bool) []*Vertex {
 	v = v.DerefDisjunct()
 	s := v.state
-	if s == nil || s.ctx != n.ctx || s.opID != n.ctx.opID || n.ctx.derefRoot(v) != v {
+	if s == nil || n.ctx.derefRoot(v) != v {
+		return nil
+	}
+	if (s.ctx != n.ctx || s.opID != n.ctx.opID) && !(earlier && v.isFinal()) {
 		return nil
 	}
 	var defs []*Vertex

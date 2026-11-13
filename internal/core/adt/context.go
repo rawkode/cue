@@ -136,6 +136,10 @@ type OpContext struct {
 	// shareTypedReference.
 	disjointDefs map[defPair]disjointResult
 
+	// closedTargets caches whether a value is closed by a definition; see
+	// closedBy.
+	closedTargets map[defPair]disjointResult
+
 	cuedebug.Config
 	Version internal.EvaluatorVersion // Copied from Runtime
 

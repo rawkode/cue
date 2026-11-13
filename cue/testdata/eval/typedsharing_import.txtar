@@ -1,0 +1,1841 @@
+# Typed references into an imported package are shared under the conditions
+# of typedsharing.txtar: the referenced field is final, is reached from the
+# root of the package by regular fields, was constrained by one of the
+# definitions of the type with its closedness enforced, and each other
+# definition of the type cannot be unified with it. These cases check that
+# results do not change where this does not hold: every value and error
+# below is that of the evaluator without sharing.
+-- cue.mod/module.cue --
+module: "mod.test"
+language: version: "v0.14.1"
+-- in.cue --
+package main
+
+import (
+	"mod.test/schema"
+	"mod.test/dep"
+	renamed "mod.test/dep"
+	"mod.test/failing"
+	"mod.test/conflict"
+	"mod.test/upper"
+)
+
+schema.#Project
+
+name: "main"
+
+// Shared: a field typed by a pattern of the package or by a direct
+// reference, a group, a field of a group, and a field of another struct.
+tasks: {
+	pattern: {cmd: "x", deps: [dep.tasks.a]}
+	direct: {cmd: "x", deps: [dep.tasks.b]}
+	group: {cmd: "x", deps: [dep.tasks.g]}
+	child: {cmd: "x", deps: [dep.tasks.g.inner]}
+	subgroup: {cmd: "x", deps: [dep.tasks.outer]}
+	nested: {cmd: "x", deps: [dep.nested.deep]}
+	local: {cmd: "x", deps: [pattern, dep.tasks.a, renamed.tasks.a]}
+	chain: {cmd: "x", deps: [upper.tasks.top]}
+	computed: {cmd: "x", deps: [dep.tasks.t1]}
+	referenced: {cmd: "x", deps: [dep.ref.tasks.ok]}
+	viaLocal: {cmd: "x", deps: [dep.tasks.viaLocal]}
+	hidden: {cmd: "x", deps: [dep.tasks.hid]}
+	abstract: {cmd: "x", deps: [dep.tasks.abstract]}
+	within: {type: "group", deps: [dep.tasks.a], kid: {cmd: "k", deps: [dep.tasks.b]}}
+	fromTemplate: #Template & {out: "o"}
+}
+#Template: schema.#Task & {cmd: "t", deps: [dep.tasks.a]}
+
+// The referenced value was not constrained by a definition of the type.
+plain: schema.#Task & {cmd: "x", deps: [dep.plain]}
+
+// A value that embeds a definition is not closed by it.
+embedded: schema.#Task & {cmd: "x", deps: [dep.embedded]}
+
+// A field that the package may declare because it embeds the definition is
+// not allowed where the value is unified with the definition again.
+allowed: schema.#Task & {cmd: "x", deps: [dep.tasks.bad]}
+allowedNested: schema.#Task & {cmd: "x", deps: [dep.tasks.badNested]}
+allowedChild: schema.#Task & {cmd: "x", deps: [dep.tasks.badGroup]}
+allowedOnly: schema.#Task & {cmd: "x", deps: [dep.tasks.badGroup.kid]}
+allowedSibling: schema.#Task & {cmd: "x", deps: [dep.tasks.badGroup.fine]}
+inStruct: schema.#Task & {cmd: "x", deps: [dep.inner.tasks.ok]}
+inStructAllowed: schema.#Task & {cmd: "x", deps: [dep.inner.tasks.bad]}
+
+// A value that lacks a required field.
+partial: schema.#Task & {cmd: "x", deps: [dep.partial]}
+
+// An optional field cannot be referenced.
+optional: schema.#Task & {cmd: "x", deps: [dep.opt]}
+
+// A definition is a type, not a value of it.
+definition: schema.#Task & {cmd: "x", deps: [dep.#Def]}
+
+// A field of a definition.
+inDefinition: schema.#Task & {cmd: "x", deps: [dep.#Holder.task]}
+
+// Fields that are computed.
+dynamic: schema.#Task & {cmd: "x", deps: [dep.dynamic]}
+generated: schema.#Task & {cmd: "x", deps: [dep.gen.c1]}
+guarded: schema.#Task & {cmd: "x", deps: [dep.guarded.task]}
+
+// A field that is itself a reference.
+alias: schema.#Task & {cmd: "x", deps: [dep.alias]}
+
+// A reference through a let is not a selection from the package.
+let Tasks = dep.tasks
+viaLet: schema.#Task & {cmd: "x", deps: [Tasks.a]}
+
+// An element of a list is not selected by a field.
+element: schema.#Task & {cmd: "x", deps: [dep.list[0]]}
+
+// A value that still has alternatives.
+either: schema.#Task & {cmd: "x", deps: [dep.either]}
+
+// A value with a default keeps it.
+defaulted: schema.#Task & {cmd: "x", deps: [dep.defaulted]}
+
+// A reference that is one of several alternatives.
+choice: schema.#Task & {cmd: "x", deps: [*dep.tasks.a | dep.tasks.b]}
+
+// Errors of the referenced value are reported at each reference.
+broken: schema.#Task & {cmd: "x", deps: [dep.broken]}
+cyclic: schema.#Task & {cmd: "x", deps: [dep.cyclic]}
+missing: schema.#Task & {cmd: "x", deps: [dep.tasks.nope]}
+
+// A reference with a further constraint is unified, not shared.
+constrained: schema.#Task & {cmd: "x", deps: [dep.tasks.a & {out: "changed"}]}
+both: schema.#Task & {cmd: "x", deps: [dep.tasks.a & dep.tasks.b]}
+
+// Definitions that are not disjoint keep the disjunction.
+ambiguous: schema.#Loose & {deps: [dep.loose]}
+
+// A type that the value was not constrained by.
+mismatch: schema.#Loose & {deps: [dep.tasks.a]}
+
+// A struct of the package that is an error, and a package that has one.
+failed: schema.#Task & {cmd: "x", deps: [failing.s.x]}
+sibling: schema.#Task & {cmd: "x", deps: [failing.ok]}
+conflicting: schema.#Task & {cmd: "x", deps: [conflict.ok]}
+-- schema/schema.cue --
+package schema
+
+#Task: {
+	type?: _|_
+	cmd!:  string
+	out:   string | *"default"
+	meta?: #Meta
+	deps?: [...#Node]
+}
+#Meta: {label?: string}
+#Group: {
+	type: "group"
+	deps?: [...#Node]
+	[!~"^(type|deps)$"]: #Task | #Group
+}
+#Node: #Task | #Group
+#Project: {
+	name!: string
+	tasks?: [string]: #Task | #Group
+	...
+}
+
+#Loose: {x?: int, deps?: [...#Any]}
+#Other: {y?: int}
+#Any: #Loose | #Other
+-- dep/dep.cue --
+package dep
+
+import (
+	"strings"
+
+	"mod.test/schema"
+)
+
+schema.#Project
+
+name: "dep"
+
+#local: schema.#Task & {out: "local"}
+
+tasks: {
+	a: {cmd: "a"}
+	b: schema.#Task & {cmd: "b", deps: [a]}
+	g: {type: "group", deps: [a], inner: {cmd: "inner"}}
+	outer: {type: "group", sub: {type: "group", leaf: {cmd: "leaf", meta: label: "l"}}}
+	viaLocal: #local & {cmd: "x"}
+	hid: {cmd: "x", _secret: 1}
+	abstract: {cmd: string}
+	for k in ["t1", "t2"] {
+		(k): {cmd: k}
+	}
+
+	// Allowed here, as this file embeds #Project.
+	bad: {cmd: "x", bogus: 1}
+	badNested: {cmd: "x", meta: {label: "l", bogus: 1}}
+	badGroup: {type: "group", kid: {cmd: "x", bogus: 1}, fine: {cmd: "fine"}}
+}
+
+inner: {
+	schema.#Project
+	name: "inner"
+	tasks: {
+		ok: {cmd: "ok"}
+		bad: {cmd: "x", bogus: 1}
+	}
+}
+ref: schema.#Project & {
+	name: "ref"
+	tasks: ok: {cmd: "ok"}
+}
+
+plain: {cmd: "plain"}
+embedded: {schema.#Task, cmd: "e", extra: 1}
+partial: schema.#Task
+opt?: schema.#Task & {cmd: "o"}
+#Def: schema.#Task & {cmd: "d"}
+#Holder: task: schema.#Task & {cmd: "h"}
+(strings.ToLower("DYNAMIC")): schema.#Task & {cmd: "dyn"}
+gen: {
+	for k in ["c1", "c2"] {
+		(k): schema.#Task & {cmd: k}
+	}
+}
+guarded: {
+	if name == "dep" {
+		task: schema.#Task & {cmd: "guarded"}
+	}
+}
+alias: tasks.a
+nested: deep: schema.#Task & {cmd: "deep"}
+list: [schema.#Task & {cmd: "l0"}]
+either: schema.#Task & {cmd: "x"} | schema.#Group & {type: "group"}
+defaulted: *(schema.#Task & {cmd: "x"}) | schema.#Group
+broken: schema.#Task & {cmd: 1}
+cyclic: schema.#Task & {cmd: "c", deps: [cyclic]}
+loose: schema.#Loose & {x: 1}
+-- upper/upper.cue --
+package upper
+
+import (
+	"mod.test/schema"
+	"mod.test/dep"
+)
+
+schema.#Project
+
+name: "upper"
+
+tasks: {
+	mid: {cmd: "mid", deps: [dep.tasks.a, dep.tasks.b]}
+	top: {cmd: "top", deps: [mid, dep.tasks.g]}
+}
+-- failing/failing.cue --
+package failing
+
+import "mod.test/schema"
+
+ok: schema.#Task & {cmd: "ok"}
+s: {x: schema.#Task & {cmd: "x"}}
+s: [1]
+-- conflict/conflict.cue --
+package conflict
+
+import "mod.test/schema"
+
+ok: schema.#Task & {cmd: "ok"}
+ok: schema.#Group
+-- out/evalalpha --
+Errors:
+allowed.deps.0: 3 errors in empty disjunction:
+allowed.deps.0.cmd: 2 errors in empty disjunction:
+allowed.deps.0.cmd: conflicting values "x" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+    ./dep/dep.cue:28:13
+    ./in.cue:45:10
+    ./in.cue:45:43
+    ./schema/schema.cue:8:13
+    ./schema/schema.cue:11:9
+    ./schema/schema.cue:14:31
+    ./schema/schema.cue:16:8
+    ./schema/schema.cue:19:28
+allowed.deps.0.cmd: conflicting values "x" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+    ./dep/dep.cue:28:13
+    ./in.cue:45:10
+    ./in.cue:45:43
+    ./schema/schema.cue:3:8
+    ./schema/schema.cue:8:13
+    ./schema/schema.cue:14:23
+    ./schema/schema.cue:16:8
+    ./schema/schema.cue:19:28
+allowedChild.deps.0: 6 errors in empty disjunction:
+allowedChild.deps.0.kid: 4 errors in empty disjunction:
+allowedChild.deps.0.kid.bogus: field not allowed:
+    ./dep/dep.cue:30:44
+allowedChild.deps.0.kid.cmd: 2 errors in empty disjunction:
+allowedChild.deps.0.kid.cmd: conflicting values "x" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+    ./dep/dep.cue:30:39
+    ./in.cue:47:48
+    ./schema/schema.cue:11:9
+    ./schema/schema.cue:14:31
+    ./schema/schema.cue:19:28
+allowedChild.deps.0.kid.cmd: conflicting values "x" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+    ./dep/dep.cue:30:39
+    ./in.cue:47:48
+    ./schema/schema.cue:3:8
+    ./schema/schema.cue:14:23
+    ./schema/schema.cue:14:31
+    ./schema/schema.cue:19:28
+allowedNested.deps.0: 3 errors in empty disjunction:
+allowedNested.deps.0.cmd: 2 errors in empty disjunction:
+allowedNested.deps.0.cmd: conflicting values "x" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+    ./dep/dep.cue:29:19
+    ./in.cue:46:16
+    ./in.cue:46:49
+    ./schema/schema.cue:8:13
+    ./schema/schema.cue:11:9
+    ./schema/schema.cue:14:31
+    ./schema/schema.cue:16:8
+    ./schema/schema.cue:19:28
+allowedNested.deps.0.cmd: conflicting values "x" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+    ./dep/dep.cue:29:19
+    ./in.cue:46:16
+    ./in.cue:46:49
+    ./schema/schema.cue:3:8
+    ./schema/schema.cue:8:13
+    ./schema/schema.cue:14:23
+    ./schema/schema.cue:16:8
+    ./schema/schema.cue:19:28
+allowedOnly.deps.0: 3 errors in empty disjunction:
+allowedOnly.deps.0.cmd: 2 errors in empty disjunction:
+allowedOnly.deps.0.cmd: conflicting values "x" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+    ./dep/dep.cue:30:39
+    ./in.cue:48:14
+    ./in.cue:48:47
+    ./schema/schema.cue:8:13
+    ./schema/schema.cue:11:9
+    ./schema/schema.cue:14:31
+    ./schema/schema.cue:16:8
+allowedOnly.deps.0.cmd: conflicting values "x" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+    ./dep/dep.cue:30:39
+    ./in.cue:48:14
+    ./in.cue:48:47
+    ./schema/schema.cue:3:8
+    ./schema/schema.cue:8:13
+    ./schema/schema.cue:14:23
+    ./schema/schema.cue:14:31
+    ./schema/schema.cue:16:8
+both.deps.0.cmd: conflicting values "b" and "a":
+    ./dep/dep.cue:16:11
+    ./dep/dep.cue:17:26
+    ./in.cue:96:40
+    ./in.cue:96:54
+broken.deps.0.cmd: conflicting values 1 and string (mismatched types int and string):
+    ./dep/dep.cue:68:9
+    ./dep/dep.cue:68:30
+    ./in.cue:90:42
+    ./schema/schema.cue:5:9
+conflicting.deps.0.cmd: 2 errors in empty disjunction:
+conflicting.deps.0.cmd: conflicting values "ok" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+    ./conflict/conflict.cue:5:5
+    ./conflict/conflict.cue:5:26
+    ./conflict/conflict.cue:6:5
+    ./in.cue:107:47
+    ./schema/schema.cue:11:9
+    ./schema/schema.cue:14:31
+conflicting.deps.0.cmd: conflicting values "ok" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+    ./conflict/conflict.cue:5:5
+    ./conflict/conflict.cue:5:26
+    ./conflict/conflict.cue:6:5
+    ./in.cue:107:47
+    ./schema/schema.cue:3:8
+    ./schema/schema.cue:14:23
+conflicting.deps.0.out: 2 errors in empty disjunction:
+conflicting.deps.0.out: conflicting values "default" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+    ./conflict/conflict.cue:5:5
+    ./conflict/conflict.cue:6:5
+    ./in.cue:107:47
+    ./schema/schema.cue:6:19
+    ./schema/schema.cue:11:9
+    ./schema/schema.cue:14:31
+conflicting.deps.0.out: conflicting values "default" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+    ./conflict/conflict.cue:5:5
+    ./conflict/conflict.cue:6:5
+    ./in.cue:107:47
+    ./schema/schema.cue:3:8
+    ./schema/schema.cue:6:19
+    ./schema/schema.cue:14:23
+cyclic.deps.0: 8 errors in empty disjunction:
+cyclic.deps.0.cmd: 2 errors in empty disjunction:
+cyclic.deps.0.cmd: conflicting values "c" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+    ./dep/dep.cue:69:9
+    ./dep/dep.cue:69:30
+    ./in.cue:91:9
+    ./in.cue:91:42
+    ./schema/schema.cue:8:13
+    ./schema/schema.cue:11:9
+    ./schema/schema.cue:14:31
+    ./schema/schema.cue:16:16
+cyclic.deps.0.cmd: conflicting values "c" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+    ./dep/dep.cue:69:9
+    ./dep/dep.cue:69:30
+    ./in.cue:91:9
+    ./in.cue:91:42
+    ./schema/schema.cue:3:8
+    ./schema/schema.cue:8:13
+    ./schema/schema.cue:14:23
+    ./schema/schema.cue:16:16
+cyclic.deps.0.deps.0: 4 errors in empty disjunction:
+cyclic.deps.0.deps.0.cmd: 2 errors in empty disjunction:
+cyclic.deps.0.deps.0.cmd: conflicting values "c" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+    ./dep/dep.cue:69:9
+    ./dep/dep.cue:69:30
+    ./dep/dep.cue:69:42
+    ./in.cue:91:42
+    ./schema/schema.cue:8:13
+    ./schema/schema.cue:11:9
+    ./schema/schema.cue:14:31
+    ./schema/schema.cue:16:16
+cyclic.deps.0.deps.0.cmd: conflicting values "c" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+    ./dep/dep.cue:69:9
+    ./dep/dep.cue:69:30
+    ./dep/dep.cue:69:42
+    ./in.cue:91:42
+    ./schema/schema.cue:3:8
+    ./schema/schema.cue:8:13
+    ./schema/schema.cue:14:23
+    ./schema/schema.cue:16:16
+cyclic.deps.0.deps.0.deps.0: structural cycle
+embedded.deps.0: 4 errors in empty disjunction:
+embedded.deps.0.cmd: 2 errors in empty disjunction:
+embedded.deps.0.cmd: conflicting values "e" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+    ./dep/dep.cue:47:11
+    ./dep/dep.cue:47:12
+    ./dep/dep.cue:47:31
+    ./in.cue:41:11
+    ./in.cue:41:44
+    ./schema/schema.cue:8:13
+    ./schema/schema.cue:11:9
+    ./schema/schema.cue:14:31
+    ./schema/schema.cue:16:16
+embedded.deps.0.cmd: conflicting values "e" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+    ./dep/dep.cue:47:11
+    ./dep/dep.cue:47:12
+    ./dep/dep.cue:47:31
+    ./in.cue:41:11
+    ./in.cue:41:44
+    ./schema/schema.cue:3:8
+    ./schema/schema.cue:8:13
+    ./schema/schema.cue:14:23
+    ./schema/schema.cue:16:16
+embedded.deps.0.extra: field not allowed:
+    ./dep/dep.cue:47:36
+inStructAllowed.deps.0: 3 errors in empty disjunction:
+inStructAllowed.deps.0.cmd: 2 errors in empty disjunction:
+inStructAllowed.deps.0.cmd: conflicting values "x" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+    ./dep/dep.cue:38:14
+    ./in.cue:51:18
+    ./in.cue:51:51
+    ./schema/schema.cue:8:13
+    ./schema/schema.cue:11:9
+    ./schema/schema.cue:14:31
+    ./schema/schema.cue:16:8
+    ./schema/schema.cue:19:28
+inStructAllowed.deps.0.cmd: conflicting values "x" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+    ./dep/dep.cue:38:14
+    ./in.cue:51:18
+    ./in.cue:51:51
+    ./schema/schema.cue:3:8
+    ./schema/schema.cue:8:13
+    ./schema/schema.cue:14:23
+    ./schema/schema.cue:16:8
+    ./schema/schema.cue:19:28
+mismatch.deps.0: 3 errors in empty disjunction:
+mismatch.deps.0.cmd: 2 errors in empty disjunction:
+mismatch.deps.0.cmd: conflicting values "a" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+    ./dep/dep.cue:16:11
+    ./in.cue:102:35
+    ./schema/schema.cue:11:9
+    ./schema/schema.cue:14:31
+    ./schema/schema.cue:19:28
+mismatch.deps.0.cmd: conflicting values "a" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+    ./dep/dep.cue:16:11
+    ./in.cue:102:35
+    ./schema/schema.cue:3:8
+    ./schema/schema.cue:14:23
+    ./schema/schema.cue:19:28
+s: conflicting values {x:("mod.test/schema".#Task & {cmd:"x"})} and [1] (mismatched types struct and list):
+    ./failing/failing.cue:6:4
+    ./failing/failing.cue:7:4
+explicit error (_|_ literal) in source:
+    ./schema/schema.cue:4:9
+
+Result:
+(_|_){
+  // [eval]
+  name: (string){ "main" }
+  tasks: (#struct){
+    pattern: (#struct){
+      cmd: (string){ "x" }
+      deps: (#list){
+        0: ~(tasks.a)
+      }
+      type?: (_|_){
+        // [user] explicit error (_|_ literal) in source:
+        //     ./schema/schema.cue:4:9
+      }
+      out: (string){ |(*(string){ "default" }, (string){ string }) }
+      meta?: ~(#Meta)
+    }
+    direct: (#struct){
+      cmd: (string){ "x" }
+      deps: (#list){
+        0: ~(tasks.b)
+      }
+      type?: (_|_){
+        // [user] explicit error (_|_ literal) in source:
+        //     ./schema/schema.cue:4:9
+      }
+      out: (string){ |(*(string){ "default" }, (string){ string }) }
+      meta?: ~(#Meta)
+    }
+    group: (#struct){
+      cmd: (string){ "x" }
+      deps: (#list){
+        0: ~(tasks.g)
+      }
+      type?: (_|_){
+        // [user] explicit error (_|_ literal) in source:
+        //     ./schema/schema.cue:4:9
+      }
+      out: (string){ |(*(string){ "default" }, (string){ string }) }
+      meta?: ~(#Meta)
+    }
+    child: (#struct){
+      cmd: (string){ "x" }
+      deps: (#list){
+        0: ~(tasks.g.inner)
+      }
+      type?: (_|_){
+        // [user] explicit error (_|_ literal) in source:
+        //     ./schema/schema.cue:4:9
+      }
+      out: (string){ |(*(string){ "default" }, (string){ string }) }
+      meta?: ~(#Meta)
+    }
+    subgroup: (#struct){
+      cmd: (string){ "x" }
+      deps: (#list){
+        0: ~(tasks.outer)
+      }
+      type?: (_|_){
+        // [user] explicit error (_|_ literal) in source:
+        //     ./schema/schema.cue:4:9
+      }
+      out: (string){ |(*(string){ "default" }, (string){ string }) }
+      meta?: ~(#Meta)
+    }
+    nested: (#struct){
+      cmd: (string){ "x" }
+      deps: (#list){
+        0: ~(nested.deep)
+      }
+      type?: (_|_){
+        // [user] explicit error (_|_ literal) in source:
+        //     ./schema/schema.cue:4:9
+      }
+      out: (string){ |(*(string){ "default" }, (string){ string }) }
+      meta?: ~(#Meta)
+    }
+    local: (#struct){
+      cmd: (string){ "x" }
+      deps: (#list){
+        0: ~(tasks.pattern)
+        1: ~(tasks.a)
+        2: ~(tasks.a)
+      }
+      type?: (_|_){
+        // [user] explicit error (_|_ literal) in source:
+        //     ./schema/schema.cue:4:9
+      }
+      out: (string){ |(*(string){ "default" }, (string){ string }) }
+      meta?: ~(#Meta)
+    }
+    chain: (#struct){
+      cmd: (string){ "x" }
+      deps: (#list){
+        0: ~(tasks.top)
+      }
+      type?: (_|_){
+        // [user] explicit error (_|_ literal) in source:
+        //     ./schema/schema.cue:4:9
+      }
+      out: (string){ |(*(string){ "default" }, (string){ string }) }
+      meta?: ~(#Meta)
+    }
+    computed: (#struct){
+      cmd: (string){ "x" }
+      deps: (#list){
+        0: ~(tasks.t1)
+      }
+      type?: (_|_){
+        // [user] explicit error (_|_ literal) in source:
+        //     ./schema/schema.cue:4:9
+      }
+      out: (string){ |(*(string){ "default" }, (string){ string }) }
+      meta?: ~(#Meta)
+    }
+    referenced: (#struct){
+      cmd: (string){ "x" }
+      deps: (#list){
+        0: ~(ref.tasks.ok)
+      }
+      type?: (_|_){
+        // [user] explicit error (_|_ literal) in source:
+        //     ./schema/schema.cue:4:9
+      }
+      out: (string){ |(*(string){ "default" }, (string){ string }) }
+      meta?: ~(#Meta)
+    }
+    viaLocal: (#struct){
+      cmd: (string){ "x" }
+      deps: (#list){
+        0: ~(tasks.viaLocal)
+      }
+      type?: (_|_){
+        // [user] explicit error (_|_ literal) in source:
+        //     ./schema/schema.cue:4:9
+      }
+      out: (string){ |(*(string){ "default" }, (string){ string }) }
+      meta?: ~(#Meta)
+    }
+    hidden: (#struct){
+      cmd: (string){ "x" }
+      deps: (#list){
+        0: ~(tasks.hid)
+      }
+      type?: (_|_){
+        // [user] explicit error (_|_ literal) in source:
+        //     ./schema/schema.cue:4:9
+      }
+      out: (string){ |(*(string){ "default" }, (string){ string }) }
+      meta?: ~(#Meta)
+    }
+    abstract: (#struct){
+      cmd: (string){ "x" }
+      deps: (#list){
+        0: ~(tasks.abstract)
+      }
+      type?: (_|_){
+        // [user] explicit error (_|_ literal) in source:
+        //     ./schema/schema.cue:4:9
+      }
+      out: (string){ |(*(string){ "default" }, (string){ string }) }
+      meta?: ~(#Meta)
+    }
+    within: (#struct){
+      type: (string){ "group" }
+      deps: (#list){
+        0: ~(tasks.a)
+      }
+      kid: (#struct){
+        cmd: (string){ "k" }
+        deps: (#list){
+          0: ~(tasks.b)
+        }
+        type?: (_|_){
+          // [user] explicit error (_|_ literal) in source:
+          //     ./schema/schema.cue:4:9
+        }
+        out: (string){ |(*(string){ "default" }, (string){ string }) }
+        meta?: ~(#Meta)
+      }
+    }
+    fromTemplate: (#struct){
+      out: (string){ "o" }
+      cmd: (string){ "t" }
+      deps: (#list){
+        0: ~(tasks.a)
+      }
+      type?: (_|_){
+        // [user] explicit error (_|_ literal) in source:
+        //     ./schema/schema.cue:4:9
+      }
+      meta?: ~(#Meta)
+    }
+  }
+  #Template: (#struct){
+    cmd: (string){ "t" }
+    deps: (#list){
+      0: ~(tasks.a)
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  plain: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: (#struct){
+        cmd: (string){ "plain" }
+        type?: (_|_){
+          // [user] explicit error (_|_ literal) in source:
+          //     ./schema/schema.cue:4:9
+        }
+        out: (string){ |(*(string){ "default" }, (string){ string }) }
+        meta?: ~(#Meta)
+        deps?: (list){
+        }
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  embedded: (_|_){
+    // [eval]
+    cmd: (string){ "x" }
+    deps: (_|_){
+      // [eval]
+      0: (_|_){
+        // [eval] embedded.deps.0: 4 errors in empty disjunction:
+        // embedded.deps.0.cmd: 2 errors in empty disjunction:
+        // embedded.deps.0.cmd: conflicting values "e" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+        //     ./dep/dep.cue:47:11
+        //     ./dep/dep.cue:47:12
+        //     ./dep/dep.cue:47:31
+        //     ./in.cue:41:11
+        //     ./in.cue:41:44
+        //     ./schema/schema.cue:8:13
+        //     ./schema/schema.cue:11:9
+        //     ./schema/schema.cue:14:31
+        //     ./schema/schema.cue:16:16
+        // embedded.deps.0.cmd: conflicting values "e" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+        //     ./dep/dep.cue:47:11
+        //     ./dep/dep.cue:47:12
+        //     ./dep/dep.cue:47:31
+        //     ./in.cue:41:11
+        //     ./in.cue:41:44
+        //     ./schema/schema.cue:3:8
+        //     ./schema/schema.cue:8:13
+        //     ./schema/schema.cue:14:23
+        //     ./schema/schema.cue:16:16
+        // embedded.deps.0.extra: field not allowed:
+        //     ./dep/dep.cue:47:36
+        cmd: (string){ "e" }
+        extra: (int){ 1 }
+        type?: (_|_){
+          // [user] explicit error (_|_ literal) in source:
+          //     ./schema/schema.cue:4:9
+        }
+        out: (_){ _ }
+        meta?: (_){ _ }
+        deps?: (list){ list }
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  allowed: (_|_){
+    // [eval]
+    cmd: (string){ "x" }
+    deps: (_|_){
+      // [eval]
+      0: (_|_){
+        // [eval] allowed.deps.0: 3 errors in empty disjunction:
+        // allowed.deps.0.cmd: 2 errors in empty disjunction:
+        // allowed.deps.0.cmd: conflicting values "x" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+        //     ./dep/dep.cue:28:13
+        //     ./in.cue:45:10
+        //     ./in.cue:45:43
+        //     ./schema/schema.cue:8:13
+        //     ./schema/schema.cue:11:9
+        //     ./schema/schema.cue:14:31
+        //     ./schema/schema.cue:16:8
+        //     ./schema/schema.cue:19:28
+        // allowed.deps.0.cmd: conflicting values "x" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+        //     ./dep/dep.cue:28:13
+        //     ./in.cue:45:10
+        //     ./in.cue:45:43
+        //     ./schema/schema.cue:3:8
+        //     ./schema/schema.cue:8:13
+        //     ./schema/schema.cue:14:23
+        //     ./schema/schema.cue:16:8
+        //     ./schema/schema.cue:19:28
+        cmd: (string){ "x" }
+        bogus: (int){ 1 }
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  allowedNested: (_|_){
+    // [eval]
+    cmd: (string){ "x" }
+    deps: (_|_){
+      // [eval]
+      0: (_|_){
+        // [eval] allowedNested.deps.0: 3 errors in empty disjunction:
+        // allowedNested.deps.0.cmd: 2 errors in empty disjunction:
+        // allowedNested.deps.0.cmd: conflicting values "x" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+        //     ./dep/dep.cue:29:19
+        //     ./in.cue:46:16
+        //     ./in.cue:46:49
+        //     ./schema/schema.cue:8:13
+        //     ./schema/schema.cue:11:9
+        //     ./schema/schema.cue:14:31
+        //     ./schema/schema.cue:16:8
+        //     ./schema/schema.cue:19:28
+        // allowedNested.deps.0.cmd: conflicting values "x" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+        //     ./dep/dep.cue:29:19
+        //     ./in.cue:46:16
+        //     ./in.cue:46:49
+        //     ./schema/schema.cue:3:8
+        //     ./schema/schema.cue:8:13
+        //     ./schema/schema.cue:14:23
+        //     ./schema/schema.cue:16:8
+        //     ./schema/schema.cue:19:28
+        cmd: (string){ "x" }
+        meta: (#struct){
+          label: (string){ "l" }
+          bogus: (int){ 1 }
+        }
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  allowedChild: (_|_){
+    // [eval]
+    cmd: (string){ "x" }
+    deps: (_|_){
+      // [eval]
+      0: (_|_){
+        // [eval] allowedChild.deps.0: 6 errors in empty disjunction:
+        // allowedChild.deps.0.kid: 4 errors in empty disjunction:
+        // allowedChild.deps.0.kid.bogus: field not allowed:
+        //     ./dep/dep.cue:30:44
+        // allowedChild.deps.0.kid.cmd: 2 errors in empty disjunction:
+        // allowedChild.deps.0.kid.cmd: conflicting values "x" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+        //     ./dep/dep.cue:30:39
+        //     ./in.cue:47:48
+        //     ./schema/schema.cue:11:9
+        //     ./schema/schema.cue:14:31
+        //     ./schema/schema.cue:19:28
+        // allowedChild.deps.0.kid.cmd: conflicting values "x" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+        //     ./dep/dep.cue:30:39
+        //     ./in.cue:47:48
+        //     ./schema/schema.cue:3:8
+        //     ./schema/schema.cue:14:23
+        //     ./schema/schema.cue:14:31
+        //     ./schema/schema.cue:19:28
+        // explicit error (_|_ literal) in source:
+        //     ./schema/schema.cue:4:9
+        type: (string){ "group" }
+        kid: (#struct){
+          cmd: (string){ "x" }
+          bogus: (int){ 1 }
+        }
+        fine: (#struct){
+          cmd: (string){ "fine" }
+        }
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  allowedOnly: (_|_){
+    // [eval]
+    cmd: (string){ "x" }
+    deps: (_|_){
+      // [eval]
+      0: (_|_){
+        // [eval] allowedOnly.deps.0: 3 errors in empty disjunction:
+        // allowedOnly.deps.0.cmd: 2 errors in empty disjunction:
+        // allowedOnly.deps.0.cmd: conflicting values "x" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+        //     ./dep/dep.cue:30:39
+        //     ./in.cue:48:14
+        //     ./in.cue:48:47
+        //     ./schema/schema.cue:8:13
+        //     ./schema/schema.cue:11:9
+        //     ./schema/schema.cue:14:31
+        //     ./schema/schema.cue:16:8
+        // allowedOnly.deps.0.cmd: conflicting values "x" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+        //     ./dep/dep.cue:30:39
+        //     ./in.cue:48:14
+        //     ./in.cue:48:47
+        //     ./schema/schema.cue:3:8
+        //     ./schema/schema.cue:8:13
+        //     ./schema/schema.cue:14:23
+        //     ./schema/schema.cue:14:31
+        //     ./schema/schema.cue:16:8
+        cmd: (string){ "x" }
+        bogus: (int){ 1 }
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  allowedSibling: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: ~(tasks.badGroup.fine)
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  inStruct: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: (#struct){
+        cmd: (string){ "ok" }
+        type?: (_|_){
+          // [user] explicit error (_|_ literal) in source:
+          //     ./schema/schema.cue:4:9
+        }
+        out: (string){ |(*(string){ "default" }, (string){ string }) }
+        meta?: ~(#Meta)
+        deps?: (list){
+        }
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  inStructAllowed: (_|_){
+    // [eval]
+    cmd: (string){ "x" }
+    deps: (_|_){
+      // [eval]
+      0: (_|_){
+        // [eval] inStructAllowed.deps.0: 3 errors in empty disjunction:
+        // inStructAllowed.deps.0.cmd: 2 errors in empty disjunction:
+        // inStructAllowed.deps.0.cmd: conflicting values "x" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+        //     ./dep/dep.cue:38:14
+        //     ./in.cue:51:18
+        //     ./in.cue:51:51
+        //     ./schema/schema.cue:8:13
+        //     ./schema/schema.cue:11:9
+        //     ./schema/schema.cue:14:31
+        //     ./schema/schema.cue:16:8
+        //     ./schema/schema.cue:19:28
+        // inStructAllowed.deps.0.cmd: conflicting values "x" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+        //     ./dep/dep.cue:38:14
+        //     ./in.cue:51:18
+        //     ./in.cue:51:51
+        //     ./schema/schema.cue:3:8
+        //     ./schema/schema.cue:8:13
+        //     ./schema/schema.cue:14:23
+        //     ./schema/schema.cue:16:8
+        //     ./schema/schema.cue:19:28
+        cmd: (string){ "x" }
+        bogus: (int){ 1 }
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  partial: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: (#struct){
+        type?: (_|_){
+          // [user] explicit error (_|_ literal) in source:
+          //     ./schema/schema.cue:4:9
+        }
+        cmd!: (string){ string }
+        out: (string){ |(*(string){ "default" }, (string){ string }) }
+        meta?: ~(#Meta)
+        deps?: (list){
+        }
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  optional: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: (_|_){
+        // [incomplete] optional.deps.0: cannot reference optional field: opt:
+        //     ./in.cue:57:48
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  definition: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: (#struct){
+        cmd: (string){ "d" }
+        type?: (_|_){
+          // [user] explicit error (_|_ literal) in source:
+          //     ./schema/schema.cue:4:9
+        }
+        out: (string){ |(*(string){ "default" }, (string){ string }) }
+        meta?: ~(#Meta)
+        deps?: (list){
+        }
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  inDefinition: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: (#struct){
+        cmd: (string){ "h" }
+        type?: (_|_){
+          // [user] explicit error (_|_ literal) in source:
+          //     ./schema/schema.cue:4:9
+        }
+        out: (string){ |(*(string){ "default" }, (string){ string }) }
+        meta?: ~(#Meta)
+        deps?: (list){
+        }
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  dynamic: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: ~(dynamic)
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  generated: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: (#struct){
+        cmd: (string){ "c1" }
+        type?: (_|_){
+          // [user] explicit error (_|_ literal) in source:
+          //     ./schema/schema.cue:4:9
+        }
+        out: (string){ |(*(string){ "default" }, (string){ string }) }
+        meta?: ~(#Meta)
+        deps?: (list){
+        }
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  guarded: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: (#struct){
+        cmd: (string){ "guarded" }
+        type?: (_|_){
+          // [user] explicit error (_|_ literal) in source:
+          //     ./schema/schema.cue:4:9
+        }
+        out: (string){ |(*(string){ "default" }, (string){ string }) }
+        meta?: ~(#Meta)
+        deps?: (list){
+        }
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  alias: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: (#struct){
+        cmd: (string){ "a" }
+        type?: (_|_){
+          // [user] explicit error (_|_ literal) in source:
+          //     ./schema/schema.cue:4:9
+        }
+        out: (string){ |(*(string){ "default" }, (string){ string }) }
+        meta?: ~(#Meta)
+        deps?: (list){
+        }
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  let Tasks#1 = ~(tasks)
+  viaLet: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: ~(tasks.a)
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  element: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: (#struct){
+        cmd: (string){ "l0" }
+        type?: (_|_){
+          // [user] explicit error (_|_ literal) in source:
+          //     ./schema/schema.cue:4:9
+        }
+        out: (string){ |(*(string){ "default" }, (string){ string }) }
+        meta?: ~(#Meta)
+        deps?: (list){
+        }
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  either: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: (#struct){ |((#struct){
+          cmd: (string){ "x" }
+          type?: (_|_){
+            // [user] explicit error (_|_ literal) in source:
+            //     ./schema/schema.cue:4:9
+          }
+          out: (string){ |(*(string){ "default" }, (string){ string }) }
+          meta?: ~(#Meta)
+          deps?: (list){
+          }
+        }, (#struct){
+          type: (string){ "group" }
+          deps?: (list){
+          }
+        }) }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  defaulted: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: (#struct){ |(*(#struct){
+          cmd: (string){ "x" }
+          type?: (_|_){
+            // [user] explicit error (_|_ literal) in source:
+            //     ./schema/schema.cue:4:9
+          }
+          out: (string){ |(*(string){ "default" }, (string){ string }) }
+          meta?: ~(#Meta)
+          deps?: (list){
+          }
+        }, (#struct){
+          type: (string){ "group" }
+          deps?: (list){
+          }
+        }) }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  choice: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: (#struct){ |(*(#struct){
+          cmd: (string){ "a" }
+          type?: (_|_){
+            // [user] explicit error (_|_ literal) in source:
+            //     ./schema/schema.cue:4:9
+          }
+          out: (string){ |(*(string){ "default" }, (string){ string }) }
+          meta?: ~(#Meta)
+          deps?: (list){
+          }
+        }, (#struct){
+          cmd: (string){ "b" }
+          deps: (#list){
+            0: ~(tasks.a)
+          }
+          type?: (_|_){
+            // [user] explicit error (_|_ literal) in source:
+            //     ./schema/schema.cue:4:9
+          }
+          out: (string){ |(*(string){ "default" }, (string){ string }) }
+          meta?: ~(#Meta)
+        }) }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  broken: (_|_){
+    // [eval]
+    cmd: (string){ "x" }
+    deps: (_|_){
+      // [eval]
+      0: (_|_){
+        // [eval]
+        cmd: (_|_){
+          // [eval] broken.deps.0.cmd: conflicting values 1 and string (mismatched types int and string):
+          //     ./dep/dep.cue:68:9
+          //     ./dep/dep.cue:68:30
+          //     ./in.cue:90:42
+          //     ./schema/schema.cue:5:9
+        }
+        type?: (_|_){
+          // [user] explicit error (_|_ literal) in source:
+          //     ./schema/schema.cue:4:9
+        }
+        out: (string){ |(*(string){ "default" }, (string){ string }) }
+        meta?: ~(#Meta)
+        deps?: (list){
+        }
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  cyclic: (_|_){
+    // [structural cycle]
+    cmd: (string){ "x" }
+    deps: (_|_){
+      // [structural cycle]
+      0: (_|_){
+        // [structural cycle] cyclic.deps.0: 8 errors in empty disjunction:
+        // cyclic.deps.0.cmd: 2 errors in empty disjunction:
+        // cyclic.deps.0.cmd: conflicting values "c" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+        //     ./dep/dep.cue:69:9
+        //     ./dep/dep.cue:69:30
+        //     ./in.cue:91:9
+        //     ./in.cue:91:42
+        //     ./schema/schema.cue:8:13
+        //     ./schema/schema.cue:11:9
+        //     ./schema/schema.cue:14:31
+        //     ./schema/schema.cue:16:16
+        // cyclic.deps.0.cmd: conflicting values "c" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+        //     ./dep/dep.cue:69:9
+        //     ./dep/dep.cue:69:30
+        //     ./in.cue:91:9
+        //     ./in.cue:91:42
+        //     ./schema/schema.cue:3:8
+        //     ./schema/schema.cue:8:13
+        //     ./schema/schema.cue:14:23
+        //     ./schema/schema.cue:16:16
+        // cyclic.deps.0.deps.0: 4 errors in empty disjunction:
+        // cyclic.deps.0.deps.0.cmd: 2 errors in empty disjunction:
+        // cyclic.deps.0.deps.0.cmd: conflicting values "c" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+        //     ./dep/dep.cue:69:9
+        //     ./dep/dep.cue:69:30
+        //     ./dep/dep.cue:69:42
+        //     ./in.cue:91:42
+        //     ./schema/schema.cue:8:13
+        //     ./schema/schema.cue:11:9
+        //     ./schema/schema.cue:14:31
+        //     ./schema/schema.cue:16:16
+        // cyclic.deps.0.deps.0.cmd: conflicting values "c" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+        //     ./dep/dep.cue:69:9
+        //     ./dep/dep.cue:69:30
+        //     ./dep/dep.cue:69:42
+        //     ./in.cue:91:42
+        //     ./schema/schema.cue:3:8
+        //     ./schema/schema.cue:8:13
+        //     ./schema/schema.cue:14:23
+        //     ./schema/schema.cue:16:16
+        // cyclic.deps.0.deps.0.deps.0: structural cycle
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  missing: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: (_|_){
+        // [incomplete] missing.deps.0: undefined field: nope:
+        //     ./in.cue:92:53
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  constrained: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: (#struct){
+        out: (string){ "changed" }
+        cmd: (string){ "a" }
+        type?: (_|_){
+          // [user] explicit error (_|_ literal) in source:
+          //     ./schema/schema.cue:4:9
+        }
+        meta?: ~(#Meta)
+        deps?: (list){
+        }
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  both: (_|_){
+    // [eval]
+    cmd: (string){ "x" }
+    deps: (_|_){
+      // [eval]
+      0: (_|_){
+        // [eval]
+        cmd: (_|_){
+          // [eval] both.deps.0.cmd: conflicting values "b" and "a":
+          //     ./dep/dep.cue:16:11
+          //     ./dep/dep.cue:17:26
+          //     ./in.cue:96:40
+          //     ./in.cue:96:54
+        }
+        deps: (#list){
+          0: ~(tasks.a)
+        }
+        type?: (_|_){
+          // [user] explicit error (_|_ literal) in source:
+          //     ./schema/schema.cue:4:9
+        }
+        out: (string){ |(*(string){ "default" }, (string){ string }) }
+        meta?: ~(#Meta)
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  ambiguous: (#struct){
+    deps: (#list){
+      0: (#struct){
+        x: (int){ 1 }
+        deps?: (list){
+        }
+      }
+    }
+    x?: (int){ int }
+  }
+  mismatch: (_|_){
+    // [eval]
+    deps: (_|_){
+      // [eval]
+      0: (_|_){
+        // [eval] mismatch.deps.0: 3 errors in empty disjunction:
+        // mismatch.deps.0.cmd: 2 errors in empty disjunction:
+        // mismatch.deps.0.cmd: conflicting values "a" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+        //     ./dep/dep.cue:16:11
+        //     ./in.cue:102:35
+        //     ./schema/schema.cue:11:9
+        //     ./schema/schema.cue:14:31
+        //     ./schema/schema.cue:19:28
+        // mismatch.deps.0.cmd: conflicting values "a" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+        //     ./dep/dep.cue:16:11
+        //     ./in.cue:102:35
+        //     ./schema/schema.cue:3:8
+        //     ./schema/schema.cue:14:23
+        //     ./schema/schema.cue:19:28
+        cmd: (string){ "a" }
+      }
+    }
+    x?: (int){ int }
+  }
+  failed: (_|_){
+    // [eval]
+    cmd: (string){ "x" }
+    deps: (_|_){
+      // [eval]
+      0: (_|_){
+        // [eval] s: conflicting values {x:("mod.test/schema".#Task & {cmd:"x"})} and [1] (mismatched types struct and list):
+        //     ./failing/failing.cue:6:4
+        //     ./failing/failing.cue:7:4
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  sibling: (#struct){
+    cmd: (string){ "x" }
+    deps: (#list){
+      0: ~(ok)
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+  conflicting: (_|_){
+    // [eval]
+    cmd: (string){ "x" }
+    deps: (_|_){
+      // [eval]
+      0: (_|_){
+        // [eval]
+        cmd: (_|_){
+          // [eval] conflicting.deps.0.cmd: 2 errors in empty disjunction:
+          // conflicting.deps.0.cmd: conflicting values "ok" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+          //     ./conflict/conflict.cue:5:5
+          //     ./conflict/conflict.cue:5:26
+          //     ./conflict/conflict.cue:6:5
+          //     ./in.cue:107:47
+          //     ./schema/schema.cue:11:9
+          //     ./schema/schema.cue:14:31
+          // conflicting.deps.0.cmd: conflicting values "ok" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+          //     ./conflict/conflict.cue:5:5
+          //     ./conflict/conflict.cue:5:26
+          //     ./conflict/conflict.cue:6:5
+          //     ./in.cue:107:47
+          //     ./schema/schema.cue:3:8
+          //     ./schema/schema.cue:14:23
+        }
+        type: (_|_){
+          // [user] explicit error (_|_ literal) in source:
+          //     ./schema/schema.cue:4:9
+        }
+        out: (_|_){
+          // [eval] conflicting.deps.0.out: 2 errors in empty disjunction:
+          // conflicting.deps.0.out: conflicting values "default" and {type:"group",deps?:[...#Node],[!~"^(type|deps)$"]:(#Task|#Group)} (mismatched types string and struct):
+          //     ./conflict/conflict.cue:5:5
+          //     ./conflict/conflict.cue:6:5
+          //     ./in.cue:107:47
+          //     ./schema/schema.cue:6:19
+          //     ./schema/schema.cue:11:9
+          //     ./schema/schema.cue:14:31
+          // conflicting.deps.0.out: conflicting values "default" and {type?:_|_(explicit error (_|_ literal) in source),cmd!:string,out:(string|*"default"),meta?:#Meta,deps?:[...#Node]} (mismatched types string and struct):
+          //     ./conflict/conflict.cue:5:5
+          //     ./conflict/conflict.cue:6:5
+          //     ./in.cue:107:47
+          //     ./schema/schema.cue:3:8
+          //     ./schema/schema.cue:6:19
+          //     ./schema/schema.cue:14:23
+        }
+        meta?: (_|_){
+          // [eval] conflicting.deps.0.meta: 3 errors in empty disjunction:
+          // conflicting.deps.0.meta.cmd: field not allowed:
+          //     ./schema/schema.cue:5:2
+          // conflicting.deps.0.meta.out: field not allowed:
+          //     ./schema/schema.cue:6:2
+          // conflicting.deps.0.meta.type: field not allowed:
+          //     ./schema/schema.cue:12:2
+          label?: (string){ string }
+        }
+        deps?: (list){
+        }
+      }
+    }
+    type?: (_|_){
+      // [user] explicit error (_|_ literal) in source:
+      //     ./schema/schema.cue:4:9
+    }
+    out: (string){ |(*(string){ "default" }, (string){ string }) }
+    meta?: ~(#Meta)
+  }
+}
+-- out/compile --
+--- in.cue
+{
+  〈import;"mod.test/schema"〉.#Project
+  name: "main"
+  tasks: {
+    pattern: {
+      cmd: "x"
+      deps: [
+        〈import;"mod.test/dep"〉.tasks.a,
+      ]
+    }
+    direct: {
+      cmd: "x"
+      deps: [
+        〈import;"mod.test/dep"〉.tasks.b,
+      ]
+    }
+    group: {
+      cmd: "x"
+      deps: [
+        〈import;"mod.test/dep"〉.tasks.g,
+      ]
+    }
+    child: {
+      cmd: "x"
+      deps: [
+        〈import;"mod.test/dep"〉.tasks.g.inner,
+      ]
+    }
+    subgroup: {
+      cmd: "x"
+      deps: [
+        〈import;"mod.test/dep"〉.tasks.outer,
+      ]
+    }
+    nested: {
+      cmd: "x"
+      deps: [
+        〈import;"mod.test/dep"〉.nested.deep,
+      ]
+    }
+    local: {
+      cmd: "x"
+      deps: [
+        〈2;pattern〉,
+        〈import;"mod.test/dep"〉.tasks.a,
+        〈import;"mod.test/dep"〉.tasks.a,
+      ]
+    }
+    chain: {
+      cmd: "x"
+      deps: [
+        〈import;"mod.test/upper"〉.tasks.top,
+      ]
+    }
+    computed: {
+      cmd: "x"
+      deps: [
+        〈import;"mod.test/dep"〉.tasks.t1,
+      ]
+    }
+    referenced: {
+      cmd: "x"
+      deps: [
+        〈import;"mod.test/dep"〉.ref.tasks.ok,
+      ]
+    }
+    viaLocal: {
+      cmd: "x"
+      deps: [
+        〈import;"mod.test/dep"〉.tasks.viaLocal,
+      ]
+    }
+    hidden: {
+      cmd: "x"
+      deps: [
+        〈import;"mod.test/dep"〉.tasks.hid,
+      ]
+    }
+    abstract: {
+      cmd: "x"
+      deps: [
+        〈import;"mod.test/dep"〉.tasks.abstract,
+      ]
+    }
+    within: {
+      type: "group"
+      deps: [
+        〈import;"mod.test/dep"〉.tasks.a,
+      ]
+      kid: {
+        cmd: "k"
+        deps: [
+          〈import;"mod.test/dep"〉.tasks.b,
+        ]
+      }
+    }
+    fromTemplate: (〈1;#Template〉 & {
+      out: "o"
+    })
+  }
+  #Template: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "t"
+    deps: [
+      〈import;"mod.test/dep"〉.tasks.a,
+    ]
+  })
+  plain: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.plain,
+    ]
+  })
+  embedded: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.embedded,
+    ]
+  })
+  allowed: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.tasks.bad,
+    ]
+  })
+  allowedNested: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.tasks.badNested,
+    ]
+  })
+  allowedChild: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.tasks.badGroup,
+    ]
+  })
+  allowedOnly: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.tasks.badGroup.kid,
+    ]
+  })
+  allowedSibling: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.tasks.badGroup.fine,
+    ]
+  })
+  inStruct: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.inner.tasks.ok,
+    ]
+  })
+  inStructAllowed: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.inner.tasks.bad,
+    ]
+  })
+  partial: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.partial,
+    ]
+  })
+  optional: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.opt,
+    ]
+  })
+  definition: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.#Def,
+    ]
+  })
+  inDefinition: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.#Holder.task,
+    ]
+  })
+  dynamic: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.dynamic,
+    ]
+  })
+  generated: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.gen.c1,
+    ]
+  })
+  guarded: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.guarded.task,
+    ]
+  })
+  alias: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.alias,
+    ]
+  })
+  let Tasks#1 = 〈import;"mod.test/dep"〉.tasks
+  viaLet: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈2;let Tasks#1〉.a,
+    ]
+  })
+  element: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.list[0],
+    ]
+  })
+  either: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.either,
+    ]
+  })
+  defaulted: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.defaulted,
+    ]
+  })
+  choice: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      (*〈import;"mod.test/dep"〉.tasks.a|〈import;"mod.test/dep"〉.tasks.b),
+    ]
+  })
+  broken: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.broken,
+    ]
+  })
+  cyclic: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.cyclic,
+    ]
+  })
+  missing: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/dep"〉.tasks.nope,
+    ]
+  })
+  constrained: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      (〈import;"mod.test/dep"〉.tasks.a & {
+        out: "changed"
+      }),
+    ]
+  })
+  both: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      (〈import;"mod.test/dep"〉.tasks.a & 〈import;"mod.test/dep"〉.tasks.b),
+    ]
+  })
+  ambiguous: (〈import;"mod.test/schema"〉.#Loose & {
+    deps: [
+      〈import;"mod.test/dep"〉.loose,
+    ]
+  })
+  mismatch: (〈import;"mod.test/schema"〉.#Loose & {
+    deps: [
+      〈import;"mod.test/dep"〉.tasks.a,
+    ]
+  })
+  failed: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/failing"〉.s.x,
+    ]
+  })
+  sibling: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/failing"〉.ok,
+    ]
+  })
+  conflicting: (〈import;"mod.test/schema"〉.#Task & {
+    cmd: "x"
+    deps: [
+      〈import;"mod.test/conflict"〉.ok,
+    ]
+  })
+}
