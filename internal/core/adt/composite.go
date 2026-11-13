@@ -125,6 +125,59 @@ func (e *Environment) DerefVertex(ctx *OpContext) *Vertex {
 	return ctx.derefRoot(e.Vertex)
 }
 
+// SettledEnvironment returns env with every vertex that evaluation abandoned
+// in a superseded disjunct replaced by the vertex that evaluation settled on
+// at the same position. It returns env itself if no vertex is replaced.
+//
+// It is meant for evaluating a conjunct of a finalized value again, outside
+// the evaluation that produced it. A disjunction clones the node it is
+// defined on, and each further disjunction of that node clones the clones of
+// the one before. A field added before the last clone keeps the environment
+// of the clone it was added to, so its conjuncts refer to a disjunct whose
+// evaluation was left unfinished. Evaluating such a conjunct resumes that
+// evaluation, without the conjuncts that later disjunctions contributed:
+// a field reference may resolve to an incomplete value, and the disjunctions
+// of the clone are processed again.
+//
+// A vertex is replaced only if it is not finalized and its replacement is.
+func SettledEnvironment(env *Environment) *Environment {
+	if env == nil {
+		return nil
+	}
+	up := SettledEnvironment(env.Up)
+	v := env.Vertex
+	if v != nil && !v.isFinal() {
+		if s := settledVertex(v); s != v && s.isFinal() {
+			v = s
+		}
+	}
+	if up == env.Up && v == env.Vertex {
+		return env
+	}
+	// The cache holds values computed in the original environment.
+	return &Environment{Up: up, Vertex: v, DynamicLabel: env.DynamicLabel}
+}
+
+// settledVertex returns the vertex that evaluation settled on at the position
+// of v: the arc with the label of v of the vertex settled on for the parent
+// of v, followed through the disjunct it resolved to. It returns v if v is
+// that vertex or if no such arc exists.
+func settledVertex(v *Vertex) *Vertex {
+	if v.Parent == nil {
+		return v
+	}
+	p := settledVertex(v.Parent)
+	if p == v.Parent && !v.IsDisjunct {
+		return v
+	}
+	for _, a := range p.DerefDisjunct().Arcs {
+		if a.Label == v.Label {
+			return a.DerefDisjunct()
+		}
+	}
+	return v
+}
+
 func (e *Environment) up(ctx *OpContext, count int32) *Environment {
 	for range count {
 		e = e.Up

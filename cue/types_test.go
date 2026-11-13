@@ -4153,6 +4153,38 @@ func TestExpr(t *testing.T) {
 	}
 }
 
+// The operands that Expr returns for a field are evaluated where the
+// enclosing value settled. out is added to the disjunct of #A made for the
+// first disjunction of x and keeps it as its environment. That disjunct is
+// cloned again for the second disjunction, which adds _n: "set", and is left
+// unfinished.
+func TestExprOperandsOfSupersededDisjunct(t *testing.T) {
+	const input = `
+		#A: {
+			kind: "a"
+			_n:   string | *"default"
+			out:  {name: string} & {name: _n}
+		}
+		#B: {kind: "b"}
+		x: #A | #B
+		x: {_n: "set", kind: "a"} | {kind: "q"}
+	`
+	cuetdtest.FullMatrix.Run(t, "", func(t *testing.T, m *cuetdtest.M) {
+		out := getValue(m, input).LookupPath(cue.ParsePath("x.out"))
+		if name, err := out.LookupPath(cue.ParsePath("name")).String(); err != nil || name != "set" {
+			t.Fatalf("x.out.name = %q, %v; want \"set\"", name, err)
+		}
+		op, operands := out.Expr()
+		if op != cue.AndOp || len(operands) != 2 {
+			t.Fatalf("x.out.Expr() = %v with %d operands; want & with 2", op, len(operands))
+		}
+		name, err := operands[1].LookupPath(cue.ParsePath("name")).String()
+		if err != nil || name != "set" {
+			t.Errorf("name of the second operand = %q, %v; want \"set\"", name, err)
+		}
+	})
+}
+
 func exprStr(v cue.Value) string {
 	op, operands := v.Expr()
 	if op == cue.NoOp {
