@@ -2890,16 +2890,25 @@ func walkFuncEscapes(fn *Function, f func(r Node, up int32) bool) bool {
 // contains a construct that it does not model, such as a try clause or an
 // evaluated value.
 func walkEscapes(x Node, depth int32, f func(r Node, up int32) bool) bool {
+	return escapeWalker{visit: f}.walk(x, depth)
+}
+
+type escapeWalker struct {
+	visit             func(r Node, up int32) bool
+	preserveSelectors bool
+}
+
+func (w escapeWalker) walk(x Node, depth int32) bool {
 	walk := func(xs ...Node) bool {
 		for _, x := range xs {
-			if !walkEscapes(x, depth, f) {
+			if !w.walk(x, depth) {
 				return false
 			}
 		}
 		return true
 	}
 	ref := func(up int32) bool {
-		return up < depth || f(x, up-depth)
+		return up < depth || w.visit(x, up-depth)
 	}
 	switch x := x.(type) {
 	case nil, *ImportReference:
@@ -2913,6 +2922,19 @@ func walkEscapes(x Node, depth int32, f func(r Node, up int32) bool) bool {
 	case *ValueReference:
 		return ref(x.UpCount)
 	case *SelectorExpr:
+		if w.preserveSelectors {
+			base := x.X
+			for {
+				switch r := base.(type) {
+				case *SelectorExpr:
+					base = r.X
+					continue
+				case *FieldReference:
+					return ref(r.UpCount)
+				}
+				break
+			}
+		}
 		return walk(x.X)
 	case *IndexExpr:
 		return walk(x.X, x.Index)
@@ -2952,15 +2974,15 @@ func walkEscapes(x Node, depth int32, f func(r Node, up int32) bool) bool {
 		for _, e := range x.Elems {
 			switch e := e.(type) {
 			case *Ellipsis:
-				if !walkEscapes(e.Value, depth+1, f) {
+				if !w.walk(e.Value, depth+1) {
 					return false
 				}
 			case Expr:
-				if !walkEscapes(e, depth+1, f) {
+				if !w.walk(e, depth+1) {
 					return false
 				}
 			case *Comprehension:
-				if !walkComprehension(e, depth+1, f) {
+				if !w.comprehension(e, depth+1) {
 					return false
 				}
 			default:
@@ -2985,7 +3007,7 @@ func walkEscapes(x Node, depth int32, f func(r Node, up int32) bool) bool {
 			case Expr:
 				es = []Expr{d}
 			case *Comprehension:
-				if !walkComprehension(d, depth+1, f) {
+				if !w.comprehension(d, depth+1) {
 					return false
 				}
 				continue
@@ -2993,7 +3015,7 @@ func walkEscapes(x Node, depth int32, f func(r Node, up int32) bool) bool {
 				return false
 			}
 			for _, e := range es {
-				if !walkEscapes(e, depth+1, f) {
+				if !w.walk(e, depth+1) {
 					return false
 				}
 			}
@@ -3005,7 +3027,7 @@ func walkEscapes(x Node, depth int32, f func(r Node, up int32) bool) bool {
 				return false
 			}
 		}
-		return walk(x.Ret) && walkEscapes(x.Body, depth+1, f)
+		return walk(x.Ret) && w.walk(x.Body, depth+1)
 	case *Vertex, *FuncValue, *BuiltinValidator:
 		return false
 	case Value:
@@ -3018,31 +3040,31 @@ func walkEscapes(x Node, depth int32, f func(r Node, up int32) bool) bool {
 // [walkEscapes] does. A for or let clause opens a scope for the clauses after
 // it and for the value; an if clause does not. The else clause is yielded in
 // the comprehension's own scope.
-func walkComprehension(x *Comprehension, depth int32, f func(r Node, up int32) bool) bool {
-	if x.Fallback != nil && !walkEscapes(x.Fallback, depth, f) {
+func (w escapeWalker) comprehension(x *Comprehension, depth int32) bool {
+	if x.Fallback != nil && !w.walk(x.Fallback, depth) {
 		return false
 	}
 	for _, cl := range x.Clauses {
 		switch cl := cl.(type) {
 		case *ForClause:
-			if !walkEscapes(cl.Src, depth, f) {
+			if !w.walk(cl.Src, depth) {
 				return false
 			}
 			depth++
 		case *LetClause:
-			if !walkEscapes(cl.Expr, depth, f) {
+			if !w.walk(cl.Expr, depth) {
 				return false
 			}
 			depth++
 		case *IfClause:
-			if !walkEscapes(cl.Condition, depth, f) {
+			if !w.walk(cl.Condition, depth) {
 				return false
 			}
 		default:
 			return false
 		}
 	}
-	return walkEscapes(x.Value, depth, f)
+	return w.walk(x.Value, depth)
 }
 
 // checkFuncDefaultsMeet reports a conflict between the defaults that two

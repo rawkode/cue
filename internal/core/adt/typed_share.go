@@ -121,7 +121,9 @@ func (n *nodeContext) shareTypedReference() bool {
 	// A branch under consideration cannot complete a sibling on behalf of
 	// the rest of the evaluation: that may hide a cycle in the branch. A
 	// field of an independent import cannot refer back to this branch.
-	if len(n.ctx.overlays) > 0 && !target.isFinal() && !(imported && n.belongsToIndependentImport(target)) {
+	if len(n.ctx.overlays) > 0 && !target.isFinal() &&
+		!(imported && n.belongsToIndependentImport(target)) &&
+		!n.targetIndependentOfBranches(target) {
 		return false
 	}
 	if !n.completeTypedTarget(target) || !n.isTypedShareTarget(target) {
@@ -312,6 +314,105 @@ func (n *nodeContext) importedField(x Expr) *Vertex {
 		return nil
 	}
 	return w
+}
+
+// targetIndependentOfBranches proves that a rooted target and its lexical
+// dependencies cannot observe any overlay. Completing a sibling before the
+// branch is settled is otherwise unsafe: its result may survive a rejected
+// alternative.
+func (n *nodeContext) targetIndependentOfBranches(target *Vertex) bool {
+	c := n.ctx
+	ancestors := map[*Vertex]bool{}
+	rootPackages := map[*Vertex]bool{}
+	for _, overlay := range c.overlays {
+		for p := overlay.root; p != nil; p = p.Parent {
+			ancestors[p] = true
+			ancestors[c.derefRoot(p)] = true
+			if p.Parent == nil {
+				rootPackages[p] = true
+			}
+		}
+	}
+	// Bound the work of this optional optimization on large reference graphs.
+	const maxVisited = 512
+	checked := map[*Vertex]bool{}
+	var check func(*Vertex) bool
+	check = func(v *Vertex) bool {
+		if ok, seen := checked[v]; seen {
+			return ok
+		}
+		if len(checked) == maxVisited || v == nil || ancestors[v] || v.IsDynamic || v.nonRooted ||
+			v.IsDisjunct || c.derefRoot(v) != v {
+			return false
+		}
+		p := v
+		for p.Parent != nil {
+			parent := p.Parent
+			if parent.IsDisjunct || c.derefRoot(parent) != parent || parent.LookupRaw(p.Label) != p {
+				return false
+			}
+			p = parent
+		}
+		if v.Label.IsDef() && p.importTemplate != nil && !rootPackages[p] &&
+			c.importInstances[p.importTemplate] == p {
+			return true
+		}
+		if !v.isFinal() && (v.Parent == nil || !v.HasConjuncts() ||
+			v.Parent.state != nil && !v.Parent.state.meets(fieldConjunctsKnown|allAncestorsProcessed)) {
+			return false
+		}
+		checked[v] = false
+		if shared, ok := v.BaseValue.(*Vertex); ok && !check(shared) {
+			return false
+		}
+		for conjunct := range v.LeafConjuncts() {
+			if _, ok := conjunct.Elem().(*Comprehension); ok {
+				return false
+			}
+			walker := escapeWalker{
+				preserveSelectors: true,
+				visit: func(ref Node, up int32) bool {
+					if conjunct.Env == nil {
+						return false
+					}
+					env := conjunct.Env.up(c, up)
+					if env == nil || env.Vertex == nil || env.Vertex.IsDisjunct || c.derefRoot(env.Vertex) != env.Vertex {
+						return false
+					}
+					switch ref.(type) {
+					case *LabelReference:
+						return true
+					case *FieldReference, *SelectorExpr:
+						return check(c.rawFieldPath(env.Vertex, ref.(Expr)))
+					}
+					return false
+				},
+			}
+			if !walker.walk(conjunct.Expr(), 0) {
+				return false
+			}
+		}
+		checked[v] = true
+		return true
+	}
+	return check(target)
+}
+
+func (c *OpContext) rawFieldPath(scope *Vertex, ref Expr) *Vertex {
+	switch x := ref.(type) {
+	case *FieldReference:
+		return scope.LookupRaw(x.Label)
+	case *SelectorExpr:
+		v := c.rawFieldPath(scope, x.X)
+		if v == nil || c.derefRoot(v) != v || v.IsDisjunct || v.IsDynamic || v.nonRooted || v.ArcType != ArcMember {
+			return nil
+		}
+		if _, ok := v.BaseValue.(*StructMarker); !ok {
+			return nil
+		}
+		return v.LookupRaw(x.Sel)
+	}
+	return nil
 }
 
 // belongsToIndependentImport reports whether v is reached through raw arcs

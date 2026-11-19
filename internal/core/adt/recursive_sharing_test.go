@@ -23,6 +23,7 @@ import (
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/cuecontext"
+	"cuelang.org/go/cue/errors"
 	"cuelang.org/go/internal"
 	"cuelang.org/go/internal/core/adt"
 	"cuelang.org/go/internal/core/runtime"
@@ -304,6 +305,59 @@ tasks: {
 				t.Fatalf("got %s; want %s", got, tc.want)
 			}
 		})
+	}
+}
+
+// The dependency list is common to both alternatives, but the sibling
+// target reads branch-dependent data. Completing the sibling before the
+// branch settles would cache a value from a discarded alternative.
+func TestRecursiveSharingOverlayDependentTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		a0    string
+		other string
+		cycle bool
+	}{
+		{
+			name:  "direct",
+			a0:    `a0: {cmd: "x", deps: [a1]} & ({branch: "one"} | {branch: "two"})`,
+			other: `a1: {cmd: a0.branch & "two"}`,
+		},
+		{
+			name:  "transitive",
+			a0:    `a0: {cmd: "x", deps: [a1]} & ({branch: "one"} | {branch: "two"})`,
+			other: "a1: {cmd: a2.cmd}\na2: {cmd: a0.branch & \"two\"}",
+		},
+		{
+			name:  "conditional cycle",
+			a0:    `a0: {cmd: "x", deps: [a1]} & ({branch: "one", must: a1.cmd & "two"} | {branch: "two"})`,
+			other: `a1: {cmd: a0.branch, if a0.branch == "two" {deps: [a0]}}`,
+			cycle: true,
+		},
+	} {
+		for _, reverse := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/reverse=%t", tc.name, reverse), func(t *testing.T) {
+				fields := []string{tc.a0, tc.other}
+				if reverse {
+					slices.Reverse(fields)
+				}
+				src := "#T: {cmd: string, branch?: string, must?: string, deps?: [...#T]}\n" +
+					"tasks: [string]: #T\ntasks: {\n" + strings.Join(fields, "\n") + "\n}\n"
+				value := cuecontext.New().CompileString(src)
+				if tc.cycle {
+					if err := value.Validate(cue.Concrete(true)); err == nil || !strings.Contains(errors.Details(err, nil), "structural cycle") {
+						t.Errorf("expected structural cycle, got %s", errors.Details(err, nil))
+					}
+					return
+				}
+				for _, path := range []string{"tasks.a0.branch", "tasks.a0.deps[0].cmd", "tasks.a1.cmd"} {
+					got, err := value.LookupPath(cue.ParsePath(path)).String()
+					if err != nil || got != "two" {
+						t.Errorf("%s: got %q, %v; want two", path, got, err)
+					}
+				}
+			})
+		}
 	}
 }
 

@@ -751,3 +751,33 @@ func TestExplicitOpenImportedTypedReferenceSharingComplexity(t *testing.T) {
 		}
 	}
 }
+
+// The package's own tasks are regular siblings, but the schema evaluates
+// their dependency lists while exploring the command and script alternatives.
+func TestLocalTypedReferenceSharingWithinOverlay(t *testing.T) {
+	schema := strings.Replace(importedSchema, "cmd!:  string", `cmd?: string
+	script?: string
+	({cmd!: string, script?: _|_} | {script!: string, cmd?: _|_})`, 1)
+	for _, depth := range []int{2, 4, 8, 16, 32} {
+		var src strings.Builder
+		src.WriteString(`package cuenv
+import "mod.test/schema"
+schema.#Project
+name: "local"
+tasks: {
+`)
+		for i := 0; i <= depth; i++ {
+			fmt.Fprintf(&src, "n%d: {cmd: \"x\"", i)
+			if i < depth {
+				fmt.Fprintf(&src, ", deps: [tasks.n%d]", i+1)
+			}
+			src.WriteString("}\n")
+		}
+		src.WriteString("}\n")
+		_, _, counts := evalPackages(t, map[string]string{"schema": schema, "main": src.String()}, "main")
+		if budget := int64(100 * (depth + 1)); counts.Unifications > budget || counts.Disjuncts > budget {
+			t.Fatalf("depth %d exceeds linear budget %d: %d unifications, %d disjuncts",
+				depth, budget, counts.Unifications, counts.Disjuncts)
+		}
+	}
+}
