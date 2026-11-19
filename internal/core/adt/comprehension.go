@@ -314,3 +314,18 @@ func pushDownDeps(n *nodeContext, t *task, x Node) condition {
 func (t *task) isPushedDownComp() bool {
 	return t.run == handleComprehension && t.completes == allTasksCompleted
 }
+
+// ForSource returns what a for clause with source x iterates over in env.
+func (c *OpContext) ForSource(env *Environment, x Expr) *Vertex {
+	saved := c.PushState(env, x.Source())
+	v := c.forSource(x)
+	if c.PopState(saved) != nil {
+		return nil
+	}
+	return v
+}
+
+// ValueEnvironment returns the environment used to evaluate the comprehension body.
+func (c *Comprehension) ValueEnvironment(env *Environment) *Environment {
+	return env
+}

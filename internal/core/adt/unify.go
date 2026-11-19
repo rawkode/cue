@@ -114,6 +114,9 @@ func (n *nodeContext) scheduleConjuncts() {
 
 	defer ctx.PopArc(ctx.PushArc(v))
 
+	if n.shareTypedReference() {
+		return
+	}
 	for i, c := range v.Conjuncts {
 		_ = i // for debugging purposes
 		ci := c.CloseInfo
@@ -186,6 +189,15 @@ func (v *Vertex) unify(c *OpContext, flags Flags) bool {
 	if n == nil {
 		return true // already completed
 	}
+
+	// Sharing and disjunction evaluation may select a value whose cycle
+	// evidence was recorded under a different parent. Carry that evidence
+	// back to this vertex and its ancestors after the target has run.
+	defer func() {
+		if v.cycleSensitive || v.DerefValue().cycleSensitive {
+			v.markCycleSensitive()
+		}
+	}()
 
 	n.retainProcess()
 	defer func() {

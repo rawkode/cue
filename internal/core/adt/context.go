@@ -129,8 +129,18 @@ func (c *OpContext) IsValidator() bool {
 type OpContext struct {
 	Runtime
 
+	// disjointDefs caches whether two definitions cannot be unified.
+	disjointDefs map[defPair]disjointResult
+
+	// closedTargets caches whether a value is closed by a definition.
+	closedTargets map[defPair]disjointResult
+
 	cuedebug.Config
 	Version internal.EvaluatorVersion // Copied from Runtime
+
+	// CompleteInternalReferences requires all conjuncts of lets and inline
+	// fields to be checked before reading them.
+	CompleteInternalReferences bool
 
 	taskContext
 
@@ -919,6 +929,12 @@ func (c *OpContext) evalStateCI(v Expr, state Flags) (result Value, ci CloseInfo
 		}
 		if arc == nil {
 			return nil, c.ci
+		}
+		// A let or inline field has no path from the root that would finalize
+		// it. Reading it must check all conjuncts, including conflicts after
+		// the first scalar value becomes known.
+		if c.CompleteInternalReferences && (arc.Label.IsLet() || arc.Internal()) {
+			state.condition |= allTasksCompleted
 		}
 		orig := arc
 		// TODO(deref): what is the right level of dereferencing here?

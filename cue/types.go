@@ -2417,6 +2417,8 @@ func (v Value) Expr() (Op, []Value) {
 	case 1:
 		// the default case, processed below.
 		env, expr = c.EnvExpr()
+		// Evaluate the operands in the scope that v was finalized in.
+		env = adt.SettledEnvironment(env)
 		if w, ok := expr.(*adt.Vertex); ok {
 			return Value{v.idx, w, v.parent_}.Expr()
 		}
@@ -2431,6 +2433,7 @@ func (v Value) Expr() (Op, []Value) {
 				Parent: v.v.Parent,
 				Label:  v.v.Label,
 			}
+			c.Env = adt.SettledEnvironment(c.Env)
 			n.AddConjunct(c)
 			n.Finalize(ctx)
 			a = append(a, makeValue(v.idx, n, v.parent_))

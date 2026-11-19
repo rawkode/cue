@@ -95,6 +95,7 @@ package embed
 import (
 	iofs "io/fs"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"cuelang.org/go/cue"
@@ -253,8 +254,19 @@ func (c *injector) InjectedValue(attr *runtime.ExternAttr, scope *adt.Vertex) (a
 	}
 
 	dir := path.Dir(loc.Path)
+	if c.b.EmbedFS != nil {
+		// Replayed build instances retain source filenames but may not have
+		// loader FS locations. Use the same directory to select and cache the FS.
+		dir = filepath.Dir(pos.File().Name())
+	}
 	if c.dir != dir {
-		fsys, err := iofs.Sub(loc.FS, dir)
+		var fsys iofs.FS
+		var err error
+		if c.b.EmbedFS != nil {
+			fsys = c.b.EmbedFS(dir)
+		} else {
+			fsys, err = iofs.Sub(loc.FS, dir)
+		}
 		if err != nil {
 			return nil, errors.Newf(pos, "cannot embed: %v", err)
 		}

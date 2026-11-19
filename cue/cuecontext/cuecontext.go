@@ -119,3 +119,13 @@ func CUE_DEBUG(s string) Option {
 		r.SetDebugOptions(&c)
 	}}
 }
+
+// CompleteInternalReferences requires evaluation to check all conjuncts of
+// lets and fields of inline values before using them. Use this when checking
+// for conflicts after adding concrete values to an existing configuration.
+// It can reject declarations that depend on resolving a cycle lazily.
+func CompleteInternalReferences() Option {
+	return Option{func(r *runtime.Runtime) {
+		r.CompleteInternalReferences = true
+	}}
+}

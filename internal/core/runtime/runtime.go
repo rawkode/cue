@@ -36,6 +36,8 @@ type Runtime struct {
 	version internal.EvaluatorVersion
 
 	flags cuedebug.Config
+
+	CompleteInternalReferences bool
 }
 
 func (r *Runtime) Settings() (internal.EvaluatorVersion, cuedebug.Config) {
@@ -45,6 +47,7 @@ func (r *Runtime) Settings() (internal.EvaluatorVersion, cuedebug.Config) {
 func (r *Runtime) ConfigureOpCtx(ctx *adt.OpContext) {
 	ctx.Version = r.version
 	ctx.Config = r.flags
+	ctx.CompleteInternalReferences = r.CompleteInternalReferences
 }
 
 var printConfig = &debug.Config{Compact: true, CompactBuiltins: true}

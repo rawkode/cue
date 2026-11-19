@@ -37,7 +37,8 @@ import "iter"
 // vertex, or a definition that vertex is already an instance of. Each is
 // scheduled in turn if the node is unshared.
 type sharedConjunct struct {
-	c   Conjunct
+	c Conjunct
+	// A nil arc marks a type constraint to replay as a conjunct.
 	arc *Vertex
 	id  CloseInfo
 }
@@ -50,6 +51,10 @@ func (n *nodeContext) unshare() {
 	}
 	n.dropSharing()
 	for _, s := range n.shared {
+		if s.arc == nil {
+			n.scheduleConjunct(s.c, s.id)
+			continue
+		}
 		n.scheduleVertexConjuncts(s.c, s.arc, s.id)
 	}
 }
@@ -158,7 +163,7 @@ func (n *nodeContext) addShared(c Conjunct, arc *Vertex, id CloseInfo) {
 	// stops [Vertex.sharesOpened] at this node.
 	if !id.Opened && !id.ConjunctOpened {
 		n.node.OpenedShared = false
-		if namesDefinition(c.Expr(), id) || arc.Label.IsDef() {
+		if namesDefinition(c.Expr(), id) || arc != nil && arc.Label.IsDef() {
 			n.node.ClosedShared = true
 		}
 	}
@@ -191,6 +196,9 @@ func (n *nodeContext) share(c Conjunct, arc *Vertex, id CloseInfo) {
 	n.isShared = true
 	n.node.OpenedShared = id.Opened || id.ConjunctOpened
 	n.addShared(c, arc, id)
+	if arc.cycleSensitive || arc.DerefValue().cycleSensitive {
+		n.node.markCycleSensitive()
+	}
 
 	if arc.IsDetached() && arc.MayAttach() { // TODO: Second check necessary?
 		// This node can safely be shared. Since it is not rooted, though, it
@@ -241,6 +249,13 @@ func (n *nodeContext) shareIfPossible(c Conjunct, arc *Vertex, id CloseInfo) boo
 		return false
 	}
 
+	if arc.ClosedRecursive && !arc.Label.IsDef() && arc.isFinal() &&
+		n.node.ArcType == ArcMember && arc.ArcType == ArcMember &&
+		arc.Bottom() == nil && arc.DerefValue().ChildErrors == nil &&
+		(arc.cycleSensitive || arc.DerefValue().cycleSensitive) && n.retainsCycleBackref(arc) {
+		return false
+	}
+
 	if n.noSharing || n.isShared || n.ctx.errs != nil {
 		return false
 	}
@@ -268,6 +283,36 @@ func (n *nodeContext) shareIfPossible(c Conjunct, arc *Vertex, id CloseInfo) boo
 
 	n.share(c, arc, id)
 	return true
+}
+
+// includesDefinition reports whether v already includes a closed reference to
+// def. Only direct, resolved definition references are evidence: opened values
+// and references inside embeddings have different closedness semantics.
+// Missing, unfinished, stale, or cycle-dependent state cannot establish that
+// the same constraint can be reused in a different evaluation context.
+func (n *nodeContext) includesDefinition(v, def *Vertex) bool {
+	if !def.Label.IsDef() || n.ctx.derefRoot(v) != v || n.ctx.derefRoot(def) != def {
+		return false
+	}
+	v = v.DerefDisjunct()
+	s := v.state
+	if s == nil || s.ctx != n.ctx || s.opID != n.ctx.opID || n.ctx.derefRoot(v) != v {
+		return false
+	}
+	if !v.isFinal() || disjunctionOf(v) != nil || v.cycleSensitive || v.DerefValue().cycleSensitive {
+		return false
+	}
+	// Replaying erroneous values preserves diagnostics at the referring path.
+	if v.Bottom() != nil || v.ChildErrors != nil || v.DerefValue().ChildErrors != nil {
+		return false
+	}
+	for _, r := range s.reqDefIDs {
+		if r.v == def && r.kind == defReference && !r.ignore &&
+			!r.conjunctOpened && r.embed == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // Vertex values that are held in BaseValue will be wrapped in the following
@@ -426,6 +471,10 @@ func (n *nodeContext) sharedClosedBy(def *Vertex) bool {
 	if !ok {
 		return false
 	}
+	// A branch cannot use unfinished sharing as closedness evidence.
+	if len(n.ctx.overlays) > 0 && !shared.isFinal() {
+		return false
+	}
 	for c := range shared.LeafConjuncts() {
 		if c.Env == nil {
 			continue
@@ -440,4 +489,55 @@ func (n *nodeContext) sharedClosedBy(def *Vertex) bool {
 		}
 	}
 	return false
+}
+
+// retainsCycleBackref reports whether the target reaches a non-root
+// enclosing value at the receiver.
+func (n *nodeContext) retainsCycleBackref(arc *Vertex) bool {
+	parentIDs := map[*Vertex]bool{}
+	for p := n.node.Parent; p != nil && p.Parent != nil; p = p.Parent {
+		parentIDs[p] = true
+		parentIDs[p.DerefDisjunct()] = true
+		parentIDs[n.ctx.derefRoot(p)] = true
+	}
+	seen := map[*Vertex]bool{}
+	var check func(*Vertex) bool
+	check = func(v *Vertex) bool {
+		if v == nil || seen[v] {
+			return false
+		}
+		seen[v] = true
+		if parentIDs[v] || parentIDs[n.ctx.derefRoot(v)] {
+			return true
+		}
+		for c := range v.LeafConjuncts() {
+			for r := c.CloseInfo.Refs; r != nil; r = r.Next {
+				if parentIDs[r.Arc] || parentIDs[n.ctx.derefRoot(r.Arc)] {
+					return true
+				}
+			}
+		}
+		if s := v.state; s != nil && s.ctx == n.ctx {
+			for _, c := range s.cyclicConjuncts {
+				if parentIDs[c.arc] || parentIDs[n.ctx.derefRoot(c.arc)] {
+					return true
+				}
+				for r := c.c.CloseInfo.Refs; r != nil; r = r.Next {
+					if parentIDs[r.Arc] || parentIDs[n.ctx.derefRoot(r.Arc)] {
+						return true
+					}
+				}
+			}
+		}
+		if p, ok := v.BaseValue.(*Vertex); ok && check(p) {
+			return true
+		}
+		for _, a := range v.Arcs {
+			if check(a) {
+				return true
+			}
+		}
+		return false
+	}
+	return check(arc)
 }

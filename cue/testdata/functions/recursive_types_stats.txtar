@@ -23,17 +23,17 @@ bound: use(cb)
 #K: {n: int, m: n + 1, t: func(p1: (#K & {n: m}).t, p2: (#K & {n: m}).t, p3: (#K & {n: m}).t) -> int}
 instances: (func(f: #H.t) -> int) & (func(f: #K.t) -> int: 1)
 -- out/eval/stats --
-Leaks:  24
+Leaks:  25
 Freed:  594
 Reused: 555
-Allocs: 63
+Allocs: 64
 Retain: 0
 
-Unifications: 576
-Conjuncts:    1015
+Unifications: 577
+Conjuncts:    1019
 Disjuncts:    0
 
-NumCloseIDs: 292
+NumCloseIDs: 294
 -- out/evalalpha --
 (struct){
   #F: (func){ func(a: 〈0;#F〉, b: 〈0;#F〉, c: 〈0;#F〉) -> 〈0;#F〉 }
