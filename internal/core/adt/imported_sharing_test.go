@@ -59,7 +59,7 @@ const importedSchema = `package schema
 #Node: #Task | #Group | #Sequence
 #Project: {
 	name!: string
-	tasks?: [n=string]: ((#Task | #Group) & {_self: n}) | #Sequence
+	tasks?: [string]~(n,_): ((#Task | #Group) & {_self: n}) | #Sequence
 	...
 }
 `
@@ -138,7 +138,7 @@ func buildPackagesWithVersions(t *testing.T, packages map[string]string, main st
 		instances[dir] = inst
 		version := versions[dir]
 		if version == "" {
-			version = "v0.14.1"
+			version = "v0.18.0"
 		}
 		file, err := parser.ParseFile(dir+"/in.cue", src, parser.Version(version))
 		if err != nil {
@@ -337,7 +337,8 @@ func TestImportedTypedReferenceSharingSemantics(t *testing.T) {
 		{"sequence", "dep.tasks.seq", true},
 		{"other struct", "dep.nested.deep", true},
 		{"referenced project", "dep.ref.tasks.ok", true},
-		{"sibling of a field with an error", "dep.tasks.badGroup.fine", true},
+		// Use ordinary lookup when a parent has an error.
+		{"sibling of a field with an error", "dep.tasks.badGroup.fine", false},
 
 		// Not constrained by a definition of the type.
 		{"plain struct", "dep.plain", false},
@@ -537,7 +538,7 @@ func writeModule(t testing.TB, packages map[string]string) string {
 			t.Fatal(err)
 		}
 	}
-	write("cue.mod/module.cue", fmt.Sprintf("module: %q\nlanguage: version: \"v0.14.1\"\n", importedModule))
+	write("cue.mod/module.cue", fmt.Sprintf("module: %q\nlanguage: version: \"v0.18.0\"\n", importedModule))
 	for dir, src := range packages {
 		write(filepath.Join(dir, "env.cue"), src)
 	}
@@ -660,7 +661,7 @@ func cuenvChain(t testing.TB, schema string, depth int, direct bool) (root, top 
 	}); err != nil {
 		t.Fatal(err)
 	}
-	write("cue.mod/module.cue", fmt.Appendf(nil, "module: %q\nlanguage: version: \"v0.14.1\"\n", module))
+	write("cue.mod/module.cue", fmt.Appendf(nil, "module: %q\nlanguage: version: \"v0.18.0\"\n", module))
 
 	task := func(body string) string {
 		if direct {

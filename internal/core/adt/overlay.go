@@ -368,3 +368,17 @@ func (ctx *overlayContext) cloneTask(t *task, dst, src *scheduler) *task {
 
 	return d
 }
+
+// insideCurrentDisjunct reports whether v belongs to the branch currently being evaluated.
+func (c *OpContext) insideCurrentDisjunct(v *Vertex) bool {
+	if len(c.overlays) == 0 {
+		return false
+	}
+	root := c.derefRoot(c.overlays[len(c.overlays)-1].root)
+	for p := v; p != nil; p = p.Parent {
+		if p == root {
+			return true
+		}
+	}
+	return false
+}

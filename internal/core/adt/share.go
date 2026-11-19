@@ -472,7 +472,7 @@ func (n *nodeContext) sharedClosedBy(def *Vertex) bool {
 		return false
 	}
 	// A branch cannot use unfinished sharing as closedness evidence.
-	if len(n.ctx.overlays) > 0 && !shared.isFinal() {
+	if !shared.isFinal() && n.ctx.insideCurrentDisjunct(n.node) {
 		return false
 	}
 	for c := range shared.LeafConjuncts() {

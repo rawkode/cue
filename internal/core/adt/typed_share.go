@@ -121,7 +121,9 @@ func (n *nodeContext) shareTypedReference() bool {
 	// A branch under consideration cannot complete a sibling on behalf of
 	// the rest of the evaluation: that may hide a cycle in the branch. A
 	// field of an independent import cannot refer back to this branch.
-	if len(n.ctx.overlays) > 0 && !target.isFinal() && !(imported && n.belongsToIndependentImport(target)) {
+	if !target.isFinal() && len(n.ctx.overlays) > 0 &&
+		!(imported && n.belongsToIndependentImport(target)) &&
+		(!n.ctx.insideCurrentDisjunct(n.node) || ref.CloseInfo.CycleType != NoCycle) {
 		return false
 	}
 	if !n.completeTypedTarget(target) || !n.isTypedShareTarget(target) {

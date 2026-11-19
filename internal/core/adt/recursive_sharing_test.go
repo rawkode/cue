@@ -23,6 +23,7 @@ import (
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/cuecontext"
+	"cuelang.org/go/cue/errors"
 	"cuelang.org/go/internal"
 	"cuelang.org/go/internal/core/adt"
 	"cuelang.org/go/internal/core/runtime"
@@ -277,7 +278,7 @@ choice: ({cmd: "x", deps: [tasks.a1]} | {cmd: "y"})
 tasks: [string]: #T
 tasks: {
 	a0: choice & {cmd: "x"}
-	a1: {cmd: "x", deps: [a0]}
+	a1: {cmd: "x"}
 }`,
 		path: "tasks.a0.deps[0].cmd",
 		want: `"x"`,
@@ -407,5 +408,95 @@ tasks: {
 				t.Fatalf("expected structural cycle, got %v: %v", b.Code, b.Err)
 			}
 		})
+	}
+}
+
+// Typed references should be shared when the referenced value was declared
+// with one of the definitions of the type. The tasks are declared through a
+// disjunction and their dependencies are typed with a union of definitions,
+// as is common in configuration schemas; replaying each dependency into every
+// disjunct of the union makes evaluation exponential in the depth of the graph.
+func TestTypedReferenceSharingComplexity(t *testing.T) {
+	for _, order := range []string{"ascending", "reverse", "mixed"} {
+		t.Run(order, func(t *testing.T) {
+			for _, depth := range []int{2, 4, 8, 16, 32} {
+				ctx, v := evalRecursiveSharing(t, typedReferenceSharingSource(order, depth))
+				counts := *ctx.Stats()
+				t.Logf("depth %d: %d unifications, %d disjuncts", depth, counts.Unifications, counts.Disjuncts)
+				budget := int64(64 * (depth + 1))
+				if counts.Unifications > budget || counts.Disjuncts > budget {
+					t.Fatalf("depth %d: evaluation exceeds linear budget %d: %d unifications, %d disjuncts",
+						depth, budget, counts.Unifications, counts.Disjuncts)
+				}
+				if b := adt.Validate(ctx, v, &adt.ValidateConfig{Concrete: true}); b != nil {
+					t.Fatalf("depth %d: unexpected evaluation error: %v", depth, b.Err)
+				}
+			}
+		})
+	}
+}
+
+func typedReferenceSharingSource(order string, depth int) string {
+	var src strings.Builder
+	src.WriteString(`#T: {
+	type?: _|_
+	cmd?: string
+	script?: string
+	({cmd!: string, script?: _|_} | {script!: string, cmd?: _|_})
+	env?: [string]: string | {secret: string}
+	deps?: [...#N]
+}
+#G: {
+	type: "group"
+	deps?: [...#N]
+	[!~"^(type|deps)$"]: #T | #G
+}
+#S: [...#N]
+#N: #T | #G | #S
+tasks: [string]~(n,_): ((#T | #G) & {_self: n}) | #S
+tasks: {
+`)
+	var fields []string
+	for i := 0; i <= depth; i++ {
+		field := fmt.Sprintf("\tn%d: {cmd: \"x\"", i)
+		if i > 0 {
+			field += fmt.Sprintf(", deps: [n%d]", i-1)
+		}
+		fields = append(fields, field+"}\n")
+	}
+	switch order {
+	case "reverse":
+		slices.Reverse(fields)
+	case "mixed":
+		var mixed []string
+		for len(fields) > 0 {
+			mixed = append(mixed, fields[len(fields)-1])
+			fields = fields[:len(fields)-1]
+			if len(fields) > 0 {
+				mixed = append(mixed, fields[0])
+				fields = fields[1:]
+			}
+		}
+		fields = mixed
+	}
+	for _, field := range fields {
+		src.WriteString(field)
+	}
+	src.WriteString("}\n")
+	return src.String()
+}
+
+// The cyclic form is invalid in this evaluator version. Sharing must preserve
+// rejection of the whole value rather than relying on a partial path lookup.
+func TestRecursiveSharingAliasedCycle(t *testing.T) {
+	value := cuecontext.New().CompileString(`#T: {cmd: string, deps?: [...#T]}
+choice: ({cmd: "x", deps: [tasks.a1]} | {cmd: "y"})
+tasks: [string]: #T
+tasks: {
+ a0: choice & {cmd: "x"}
+ a1: {cmd: "x", deps: [a0]}
+}`)
+	if err := value.Validate(); err == nil || !strings.Contains(errors.Details(err, nil), "structural cycle") {
+		t.Fatalf("validation = %s; want structural cycle", errors.Details(err, nil))
 	}
 }
